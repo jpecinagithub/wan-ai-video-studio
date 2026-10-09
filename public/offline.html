@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#0a0a0f" />
+    <title>Sin conexión — WAN AI Video Studio</title>
+    <style>
+      * { box-sizing: border-box; margin: 0; padding: 0; }
+      body {
+        background: #0a0a0f; color: #f4f4f5;
+        font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+        min-height: 100dvh; display: flex; align-items: center; justify-content: center;
+        padding: 1.5rem; text-align: center;
+      }
+      .card {
+        background: #14141c; border: 1px solid #2a2a3a; border-radius: 0.875rem;
+        padding: 2.5rem 2rem; max-width: 26rem; box-shadow: 0 8px 30px rgba(0,0,0,.35);
+      }
+      .icon {
+        width: 3.5rem; height: 3.5rem; margin: 0 auto 1rem; border-radius: 1rem;
+        background: rgba(139,92,246,.14); color: #8b5cf6;
+        display: flex; align-items: center; justify-content: center;
+        font-size: 1.75rem;
+      }
+      h1 { font-size: 1.25rem; margin-bottom: .5rem; }
+      p { color: #a8a8b3; font-size: .9rem; line-height: 1.6; margin-bottom: 1.5rem; }
+      button {
+        background: #8b5cf6; color: #fff; border: 0; border-radius: .75rem;
+        padding: .8rem 1.75rem; font-size: .95rem; font-weight: 600; cursor: pointer;
+        min-height: 44px;
+      }
+      button:hover { background: #7c3aed; }
+    </style>
+  </head>
+  <body>
+    <div class="card">
+      <div class="icon" aria-hidden="true">📡</div>
+      <h1>Sin conexión</h1>
+      <p>
+        Parece que no tienes conexión a internet.<br />
+        Para generar vídeos necesitas estar conectado, ya que el proceso se realiza en la nube.
+      </p>
+      <button type="button" onclick="location.reload()">Reintentar</button>
+    </div>
+  </body>
+</html>

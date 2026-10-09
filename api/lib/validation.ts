@@ -1,0 +1,57 @@
+import { z } from 'zod';
+
+/**
+ * Validación estricta de todas las entradas de la API con Zod.
+ *
+ * Límites verificados contra la documentación oficial de Alibaba Cloud
+ * Model Studio (2026-10-09): prompt máx. 20000 caracteres, duración entera
+ * [2,30], resolución 480p|720p|1080p (se mapea a 480P|720P|1080P),
+ * ratio oficial: 16:9|21:9|9:16|1:1|4:3|3:4|auto (auto → 'adaptive').
+ */
+
+/** Lista cerrada de modelos permitidos. Ningún otro modelo es aceptado. */
+export const MODEL_IDS = ['wan3.0-video', 'wan3.0-video-prime'] as const;
+export type ModelIdApi = (typeof MODEL_IDS)[number];
+
+export const GenerateVideoBodySchema = z.object({
+  prompt: z
+    .string({ required_error: 'El prompt es obligatorio.' })
+    .trim()
+    .min(1, 'El prompt no puede estar vacío.')
+    .max(20000, 'El prompt supera los 20000 caracteres permitidos.'),
+  modelId: z.enum(MODEL_IDS, { errorMap: () => ({ message: 'Modelo no válido.' }) }),
+  duration: z
+    .number({ invalid_type_error: 'La duración debe ser un número.' })
+    .int('La duración debe ser un número entero de segundos.')
+    .min(2, 'La duración mínima es de 2 segundos.')
+    .max(30, 'La duración máxima es de 30 segundos.'),
+  resolution: z.enum(['480p', '720p', '1080p'], {
+    errorMap: () => ({ message: 'Resolución no válida.' }),
+  }),
+  aspectRatio: z.enum(['16:9', '21:9', '9:16', '1:1', '4:3', '3:4', 'auto'], {
+    errorMap: () => ({ message: 'Relación de aspecto no válida.' }),
+  }),
+  audio: z.boolean().default(true),
+  seed: z.number().int().min(0).max(2147483647).optional(),
+  enhancePrompt: z.boolean().optional(),
+  watermark: z.boolean().optional(),
+  clientRequestId: z.string().uuid('El identificador de petición no es válido.').optional(),
+});
+
+export type GenerateVideoBody = z.infer<typeof GenerateVideoBodySchema>;
+
+export const StatusQuerySchema = z.object({
+  taskId: z
+    .string({ required_error: 'Falta el identificador de la tarea.' })
+    .trim()
+    .min(1, 'El identificador de la tarea no puede estar vacío.')
+    .max(256, 'El identificador de la tarea no es válido.'),
+});
+
+/** Detalles de validación listos para el cliente (sin datos sensibles). */
+export function formatZodIssues(error: z.ZodError): Array<{ campo: string; mensaje: string }> {
+  return error.issues.map((i) => ({
+    campo: i.path.join('.') || '(raíz)',
+    mensaje: i.message,
+  }));
+}
