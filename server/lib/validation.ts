@@ -13,6 +13,30 @@ import { z } from 'zod';
 export const MODEL_IDS = ['wan3.0-video', 'wan3.0-video-prime'] as const;
 export type ModelIdApi = (typeof MODEL_IDS)[number];
 
+/**
+ * Imagen de referencia (verificado en la documentación oficial 2026-10-09):
+ * `type: "reference_image"` (máx. 10), URL pública https o data URI base64.
+ * Esta app envía siempre data URI (sin hosting externo).
+ */
+const DATA_URI_IMAGEN = /^data:image\/(jpeg|jpg|png|webp|bmp);base64,[A-Za-z0-9+/]+={0,2}$/;
+/** ~420 KB de base64 ≈ 300 KB de imagen comprimida en cliente, con margen. */
+const MAX_DATA_URI_CHARS = 420_000;
+/** Límite oficial de imágenes de referencia por petición. */
+export const MAX_MEDIA_REFERENCIA = 10;
+
+const MediaReferenciaSchema = z.object({
+  type: z.literal('reference_image'),
+  url: z
+    .string({ required_error: 'La imagen de referencia no es válida.' })
+    .max(MAX_DATA_URI_CHARS, 'La imagen de referencia es demasiado grande (máx. ~300 KB comprimida).')
+    .regex(
+      DATA_URI_IMAGEN,
+      'La imagen debe ser un data URI válido (JPG, PNG, WEBP o BMP en base64).',
+    ),
+});
+
+export type MediaReferenciaApi = z.infer<typeof MediaReferenciaSchema>;
+
 export const GenerateVideoBodySchema = z.object({
   prompt: z
     .string({ required_error: 'El prompt es obligatorio.' })
@@ -36,6 +60,10 @@ export const GenerateVideoBodySchema = z.object({
   enhancePrompt: z.boolean().optional(),
   watermark: z.boolean().optional(),
   clientRequestId: z.string().uuid('El identificador de petición no es válido.').optional(),
+  media: z
+    .array(MediaReferenciaSchema)
+    .max(MAX_MEDIA_REFERENCIA, 'El máximo es 10 imágenes de referencia.')
+    .optional(),
 });
 
 export type GenerateVideoBody = z.infer<typeof GenerateVideoBodySchema>;

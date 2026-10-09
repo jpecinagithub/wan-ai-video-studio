@@ -20,6 +20,17 @@ export type Resolution = '480p' | '720p' | '1080p';
  */
 export type AspectRatio = '16:9' | '9:16' | '1:1' | '4:3' | '3:4' | '21:9' | 'auto';
 
+/**
+ * Imagen de referencia para la generación (verificado en la documentación
+ * oficial de Model Studio 2026-10-09: `type: "reference_image"`, máx. 10;
+ * en el prompt se mencionan como "Image 1", "Image 2", ...).
+ * Se envía como data URI base64 (sin hosting externo).
+ */
+export interface MediaReferencia {
+  type: 'reference_image';
+  url: string; // data:image/{jpeg|png|webp|bmp};base64,...
+}
+
 export interface GenerationRequest {
   prompt: string;
   modelId: ModelId;
@@ -31,6 +42,8 @@ export interface GenerationRequest {
   enhancePrompt?: boolean;
   watermark?: boolean;
   clientRequestId: string;
+  /** Imágenes de referencia (opcional, máx. 10). No se persisten en el historial. */
+  media?: MediaReferencia[];
 }
 
 export interface GenerationResponse {

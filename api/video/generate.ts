@@ -11,7 +11,7 @@ import {
 } from '../../server/lib/tareas.js';
 import { GenerateVideoBodySchema, formatZodIssues } from '../../server/lib/validation.js';
 
-const MAX_BODY_BYTES = 64 * 1024; // 64 KB: suficiente para el prompt más largo.
+const MAX_BODY_BYTES = 4 * 1024 * 1024; // 4 MB: prompt + hasta 10 imágenes de referencia comprimidas (~300 KB c/u). Límite duro de Vercel Hobby ≈ 4.5 MB.
 const MAX_CLAVE_IDEMPOTENCIA = 256;
 
 /**
@@ -24,7 +24,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
   try {
     if (!requireMethod(req, res, 'POST')) return;
 
-    const cuerpo = readJsonBody(req, MAX_BODY_BYTES);
+    const cuerpo = readJsonBody(
+      req,
+      MAX_BODY_BYTES,
+      'La solicitud es demasiado grande (máx. 4 MB). Reduce el número o el tamaño de las imágenes de referencia.',
+    );
     const parsed = GenerateVideoBodySchema.safeParse(cuerpo);
     if (!parsed.success) {
       throw new HttpError(
@@ -73,6 +77,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
       mejoraPrompt: datos.enhancePrompt,
       marcaAgua: datos.watermark,
       idPeticionCliente: datos.clientRequestId,
+      media: datos.media,
     });
 
     const respuesta: RespuestaCreacion = {

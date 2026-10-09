@@ -21,6 +21,7 @@ import {
 } from 'lucide-react';
 import { Button, Card, ErrorBanner, FieldLabel, Modal, Toggle } from '../components/ui';
 import { CuotaModelo } from '../components/CuotaModelo';
+import { ImagenesReferencia, type ImagenReferenciaItem } from '../components/ImagenesReferencia';
 import { VideoPlayer } from '../components/VideoPlayer';
 import {
   CAPACIDADES,
@@ -43,6 +44,7 @@ import type {
 } from '../types';
 import { cn, formatFecha, formatSeconds, newRequestId, truncate } from '../utils/format';
 import { formatearFechaCorta } from '../utils/quota';
+import { ErrorImagen, MAX_IMAGENES_REFERENCIA, comprimirImagen } from '../utils/imagenes';
 import { guardarVideo, obtenerVideo } from '../utils/db';
 import { descargarVideo } from '../utils/download';
 
@@ -114,6 +116,9 @@ export function Studio() {
   const [mejoraPrompt, setMejoraPrompt] = useState(true);
   const [marcaAgua, setMarcaAgua] = useState(false);
   const [copiado, setCopiado] = useState(false);
+  const [imagenes, setImagenes] = useState<ImagenReferenciaItem[]>([]);
+  const [errorImagenes, setErrorImagenes] = useState<string | null>(null);
+  const [procesandoImagenes, setProcesandoImagenes] = useState(false);
 
   /* ---------- Estado de flujo ---------- */
   const [modalAbierto, setModalAbierto] = useState(false);
@@ -218,6 +223,52 @@ export function Studio() {
     track('seleccion_modelo', { modelo: id });
   };
 
+  /* ---------- Imágenes de referencia ---------- */
+  const añadirImagenes = async (archivos: File[]) => {
+    if (archivos.length === 0 || procesandoImagenes) return;
+    setErrorImagenes(null);
+    const hueco = MAX_IMAGENES_REFERENCIA - imagenes.length;
+    if (hueco <= 0) {
+      setErrorImagenes(`El máximo es ${MAX_IMAGENES_REFERENCIA} imágenes de referencia.`);
+      return;
+    }
+    const lote = archivos.slice(0, hueco);
+    setProcesandoImagenes(true);
+    try {
+      const comprimidas: ImagenReferenciaItem[] = [];
+      for (const archivo of lote) {
+        const c = await comprimirImagen(archivo);
+        comprimidas.push({ id: newRequestId(), dataUrl: c.dataUrl, nombre: c.nombre });
+      }
+      setImagenes((prev) => [...prev, ...comprimidas].slice(0, MAX_IMAGENES_REFERENCIA));
+      if (archivos.length > hueco) {
+        setErrorImagenes(
+          `Se añadieron ${hueco} de ${archivos.length}: el máximo es ${MAX_IMAGENES_REFERENCIA} imágenes.`,
+        );
+      }
+    } catch (err) {
+      setErrorImagenes(
+        err instanceof ErrorImagen ? err.message : 'No se pudieron procesar las imágenes.',
+      );
+    } finally {
+      setProcesandoImagenes(false);
+    }
+  };
+
+  const eliminarImagen = (id: string) => {
+    setImagenes((prev) => prev.filter((img) => img.id !== id));
+    setErrorImagenes(null);
+  };
+
+  const insertarEtiquetaEnPrompt = (etiqueta: string) => {
+    setPrompt((prev) => {
+      const base = prev.trimEnd();
+      if (base.endsWith(etiqueta)) return prev;
+      const separador = base.length === 0 ? '' : ' ';
+      return `${base}${separador}${etiqueta}`;
+    });
+  };
+
   const limpiar = () => setPrompt('');
 
   const copiar = async () => {
@@ -269,6 +320,10 @@ export function Studio() {
         enhancePrompt: mejoraPrompt || undefined,
         watermark: marcaAgua || undefined,
         clientRequestId: newRequestId(),
+        media:
+          imagenes.length > 0
+            ? imagenes.map((img) => ({ type: 'reference_image' as const, url: img.dataUrl }))
+            : undefined,
       });
       const startedAt = new Date().toISOString();
       const pendiente: TareaPendienteGuardada = { taskId: respuesta.taskId, params, startedAt };
@@ -427,6 +482,17 @@ export function Studio() {
             })}
           </div>
         </Card>
+
+        {/* Imágenes de referencia */}
+        <ImagenesReferencia
+          imagenes={imagenes}
+          onAñadir={añadirImagenes}
+          onEliminar={eliminarImagen}
+          onInsertarEnPrompt={insertarEtiquetaEnPrompt}
+          procesando={procesandoImagenes}
+          error={errorImagenes}
+          deshabilitado={enviando || !!tareaActiva}
+        />
 
         {/* Prompt */}
         <Card>
@@ -950,6 +1016,12 @@ export function Studio() {
           <div>
             <dt className="text-xs text-muted">Audio</dt>
             <dd className="mt-0.5 font-medium">{audio ? 'Sí' : 'No'}</dd>
+          </div>
+          <div>
+            <dt className="text-xs text-muted">Imágenes de referencia</dt>
+            <dd className="mt-0.5 font-medium">
+              {imagenes.length > 0 ? `${imagenes.length}` : 'Ninguna'}
+            </dd>
           </div>
           <div>
             <dt className="text-xs text-muted">Coste estimado</dt>

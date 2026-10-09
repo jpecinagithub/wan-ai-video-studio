@@ -85,13 +85,13 @@ export function requireMethod(req: VercelRequest, res: VercelResponse, ...metodo
  * Lee el cuerpo JSON con límite de tamaño (protección contra abusos).
  * Vercel ya parsea el JSON cuando el Content-Type es application/json.
  */
-export function readJsonBody(req: VercelRequest, maxBytes: number): unknown {
+export function readJsonBody(req: VercelRequest, maxBytes: number, mensajeExceso?: string): unknown {
   const longitud = Number(req.headers['content-length'] ?? 0);
   if (longitud > maxBytes) {
     throw new HttpError(
       413,
       'PAYLOAD_TOO_LARGE',
-      'La solicitud es demasiado grande. Reduce el tamaño del prompt.',
+      mensajeExceso ?? 'La solicitud es demasiado grande. Reduce el tamaño del prompt.',
     );
   }
   const cuerpo = req.body as unknown;

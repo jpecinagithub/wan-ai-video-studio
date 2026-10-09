@@ -34,6 +34,8 @@ export interface EntradaCrearVideo {
   mejoraPrompt?: boolean;
   marcaAgua?: boolean;
   idPeticionCliente?: string;
+  /** Imágenes de referencia (máx. 10, data URI base64). Se envían en input.media. */
+  media?: Array<{ type: 'reference_image'; url: string }>;
 }
 
 export interface UsoTareaProveedor {
@@ -187,6 +189,13 @@ export class AlibabaVideoProvider {
     if (entrada.marcaAgua !== undefined) parameters.watermark = entrada.marcaAgua;
 
     const url = `${this.env.baseUrl}/services/aigc/video-generation/video-synthesis`;
+    const imagenes = entrada.media?.length ?? 0;
+
+    const input: Record<string, unknown> = { prompt: entrada.prompt };
+    if (imagenes > 0) {
+      // Modo con imágenes de referencia: el prompt las menciona como "Image 1", "Image 2", ...
+      input.media = entrada.media!.map((m) => ({ type: m.type, url: m.url }));
+    }
 
     let respuesta: Response;
     try {
@@ -199,16 +208,16 @@ export class AlibabaVideoProvider {
         },
         body: JSON.stringify({
           model: entrada.modelId,
-          input: { prompt: entrada.prompt },
+          input,
           parameters,
         }),
         signal: AbortSignal.timeout(TIMEOUT_CREACION_MS),
       });
     } catch (err) {
       if (esErrorAbortado(err)) {
-        logProveedor('crear_timeout', { prompt: truncarPrompt(entrada.prompt) });
+        logProveedor('crear_timeout', { prompt: truncarPrompt(entrada.prompt), imagenes });
       } else {
-        logProveedor('crear_red_error', { prompt: truncarPrompt(entrada.prompt) });
+        logProveedor('crear_red_error', { prompt: truncarPrompt(entrada.prompt), imagenes });
       }
       throw new HttpError(
         502,
@@ -226,6 +235,7 @@ export class AlibabaVideoProvider {
         code: cuerpo.code,
         requestId,
         prompt: truncarPrompt(entrada.prompt),
+        imagenes,
       });
       throw mapProviderError(respuesta.status, cuerpo.code, cuerpo.message);
     }
@@ -233,7 +243,7 @@ export class AlibabaVideoProvider {
     const salida = (cuerpo.output ?? {}) as Record<string, unknown>;
     const taskId = salida.task_id as string | undefined;
     if (!taskId) {
-      logProveedor('crear_sin_task_id', { requestId, prompt: truncarPrompt(entrada.prompt) });
+      logProveedor('crear_sin_task_id', { requestId, prompt: truncarPrompt(entrada.prompt), imagenes });
       throw new HttpError(
         502,
         'PROVIDER_ERROR',
@@ -241,7 +251,7 @@ export class AlibabaVideoProvider {
       );
     }
 
-    logProveedor('crear_ok', { taskId, requestId, prompt: truncarPrompt(entrada.prompt) });
+    logProveedor('crear_ok', { taskId, requestId, prompt: truncarPrompt(entrada.prompt), imagenes });
     return { taskId, estado: 'pending', cruda: salida };
   }
 

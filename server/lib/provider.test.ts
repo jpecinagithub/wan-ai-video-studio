@@ -244,4 +244,58 @@ describe('AlibabaVideoProvider (fetch simulado)', () => {
     const tarea = await proveedor.obtenerTareaVideo('task-vieja');
     expect(tarea.estado).toBe('unknown');
   });
+
+  it('crearTareaVideo incluye input.media con las imágenes de referencia', async () => {
+    const fetchMock = vi.fn(async () =>
+      respuestaJson({ output: { task_id: 'task-media', task_status: 'PENDING' }, request_id: 'req-m' }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    const proveedor = new AlibabaVideoProvider(ENV);
+
+    const media = [
+      { type: 'reference_image' as const, url: 'data:image/jpeg;base64,QUJD' },
+      { type: 'reference_image' as const, url: 'data:image/png;base64,REVG' },
+    ];
+    await proveedor.crearTareaVideo({ ...entradaBase, media });
+
+    const [, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    const cuerpo = JSON.parse(init.body as string) as Record<string, any>;
+    expect(cuerpo.input.prompt).toBe(entradaBase.prompt);
+    expect(cuerpo.input.media).toEqual(media);
+  });
+
+  it('crearTareaVideo no envía input.media cuando no hay imágenes (comportamiento intacto)', async () => {
+    const fetchMock = vi.fn(async () =>
+      respuestaJson({ output: { task_id: 'task-sin', task_status: 'PENDING' }, request_id: 'req-s' }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    const proveedor = new AlibabaVideoProvider(ENV);
+
+    await proveedor.crearTareaVideo(entradaBase);
+
+    const [, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    const cuerpo = JSON.parse(init.body as string) as Record<string, any>;
+    expect(cuerpo.input).toEqual({ prompt: entradaBase.prompt });
+    expect(cuerpo.input).not.toHaveProperty('media');
+  });
+
+  it('crearTareaVideo no vuelca el base64 en los logs', async () => {
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    const fetchMock = vi.fn(async () =>
+      respuestaJson({ output: { task_id: 'task-log', task_status: 'PENDING' }, request_id: 'req-l' }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    const proveedor = new AlibabaVideoProvider(ENV);
+
+    const secreto = 'data:image/jpeg;base64,' + 'U0VDUkVUTw=='.repeat(50);
+    await proveedor.crearTareaVideo({
+      ...entradaBase,
+      media: [{ type: 'reference_image' as const, url: secreto }],
+    });
+
+    const todoLoRegistrado = logSpy.mock.calls.map((c) => String(c[0])).join(' ');
+    expect(todoLoRegistrado).not.toContain(secreto.slice(30));
+    expect(todoLoRegistrado).toContain('"imagenes":1');
+    logSpy.mockRestore();
+  });
 });

@@ -67,8 +67,87 @@ describe('GenerateVideoBodySchema', () => {
   });
 });
 
-describe('StatusQuerySchema', () => {
-  it('acepta un taskId válido', () => {
+describe('GenerateVideoBodySchema: media (imágenes de referencia)', () => {
+  const dataUri = (mime = 'image/jpeg', tamano = 100) =>
+    `data:${mime};base64,${'A'.repeat(tamano)}`;
+  const mediaValida = [{ type: 'reference_image' as const, url: dataUri() }];
+
+  it('acepta la petición sin media (comportamiento actual intacto)', () => {
+    const resultado = GenerateVideoBodySchema.safeParse(cuerpoValido);
+    expect(resultado.success).toBe(true);
+    if (resultado.success) expect(resultado.data.media).toBeUndefined();
+  });
+
+  it('acepta hasta 10 imágenes de referencia válidas', () => {
+    const media = Array.from({ length: 10 }, (_, i) => ({
+      type: 'reference_image' as const,
+      url: dataUri('image/png', 50 + i),
+    }));
+    const resultado = GenerateVideoBodySchema.safeParse({ ...cuerpoValido, media });
+    expect(resultado.success).toBe(true);
+  });
+
+  it('rechaza más de 10 imágenes', () => {
+    const media = Array.from({ length: 11 }, () => ({
+      type: 'reference_image' as const,
+      url: dataUri(),
+    }));
+    const resultado = GenerateVideoBodySchema.safeParse({ ...cuerpoValido, media });
+    expect(resultado.success).toBe(false);
+  });
+
+  it('rechaza type distinto de reference_image', () => {
+    const resultado = GenerateVideoBodySchema.safeParse({
+      ...cuerpoValido,
+      media: [{ type: 'first_frame', url: dataUri() }],
+    });
+    expect(resultado.success).toBe(false);
+  });
+
+  it('rechaza URL que no es data URI de imagen', () => {
+    const resultado = GenerateVideoBodySchema.safeParse({
+      ...cuerpoValido,
+      media: [{ type: 'reference_image', url: 'https://example.com/foto.jpg' }],
+    });
+    expect(resultado.success).toBe(false);
+  });
+
+  it('rechaza MIME no soportado (gif)', () => {
+    const resultado = GenerateVideoBodySchema.safeParse({
+      ...cuerpoValido,
+      media: [{ type: 'reference_image', url: dataUri('image/gif') }],
+    });
+    expect(resultado.success).toBe(false);
+  });
+
+  it('rechaza data URI con caracteres fuera del alfabeto base64', () => {
+    const resultado = GenerateVideoBodySchema.safeParse({
+      ...cuerpoValido,
+      media: [{ type: 'reference_image', url: 'data:image/jpeg;base64,!!!no-base64!!!' }],
+    });
+    expect(resultado.success).toBe(false);
+  });
+
+  it('rechaza imágenes demasiado grandes', () => {
+    const resultado = GenerateVideoBodySchema.safeParse({
+      ...cuerpoValido,
+      media: [{ type: 'reference_image', url: dataUri('image/jpeg', 500_000) }],
+    });
+    expect(resultado.success).toBe(false);
+  });
+
+  it('acepta jpeg, png, webp y bmp', () => {
+    for (const mime of ['image/jpeg', 'image/png', 'image/webp', 'image/bmp']) {
+      const resultado = GenerateVideoBodySchema.safeParse({
+        ...cuerpoValido,
+        media: [{ type: 'reference_image', url: dataUri(mime) }],
+      });
+      expect(resultado.success).toBe(true);
+    }
+  });
+});
+
+describe('StatusQuerySchema', () => {  it('acepta un taskId válido', () => {
     expect(StatusQuerySchema.safeParse({ taskId: 'abc-123' }).success).toBe(true);
   });
 
