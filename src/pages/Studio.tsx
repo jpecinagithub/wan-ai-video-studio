@@ -663,7 +663,18 @@ export function Studio() {
         {/* Coste estimado */}
         <Card>
           <h2 className="mb-2 text-base font-semibold">Coste estimado</h2>
-          <p className="text-sm text-muted">{coste.texto}</p>
+          {cuotaModal.restantes > 0 && !cuotaModal.caducada ? (
+            <>
+              <p className="text-lg font-bold text-success">Gratis</p>
+              <p className="mt-1 text-xs text-muted">
+                Cuota gratuita: {cuotaModal.restantes} de {cuotaModal.total} restantes · Válida
+                hasta el {formatearFechaCorta(cuotaModal.expiraISO)}
+              </p>
+              <p className="mt-1 text-xs text-muted/70">Sin cuota gratuita: {coste.texto}</p>
+            </>
+          ) : (
+            <p className="text-sm text-muted">{coste.texto}</p>
+          )}
           <p className="mt-1 text-xs text-muted">
             Modelo: {modelo?.nombre} · {formatSeconds(duracion)} · {resolucion}
           </p>
@@ -942,7 +953,15 @@ export function Studio() {
           </div>
           <div>
             <dt className="text-xs text-muted">Coste estimado</dt>
-            <dd className="mt-0.5 font-medium">{coste.texto}</dd>
+            <dd className="mt-0.5 font-medium">
+              {cuotaModal.restantes > 0 && !cuotaModal.caducada ? (
+                <>
+                  Gratis <span className="font-normal text-muted">(cuota gratuita)</span>
+                </>
+              ) : (
+                coste.texto
+              )}
+            </dd>
           </div>
         </dl>
         <p className="mt-3 rounded-xl2 bg-surface-2 p-3 text-xs leading-relaxed text-muted">
