@@ -1,6 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { requireMethod, sendError, sendOk } from '../lib/errors.js';
-import { MONEDA_PRECIOS, MODELOS } from '../lib/capabilities.js';
+import { requireMethod, sendError, sendOk } from '../../server/lib/errors.js';
+import { MONEDA_PRECIOS, MODELOS } from '../../server/lib/capabilities.js';
 
 /**
  * GET /api/video/models

@@ -1,7 +1,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { requireMethod, sendError, sendOk } from '../lib/errors.js';
-import { MODELOS } from '../lib/capabilities.js';
-import { MAX_SIMULTANEAS } from '../lib/tareas.js';
+import { requireMethod, sendError, sendOk } from '../../server/lib/errors.js';
+import { MODELOS } from '../../server/lib/capabilities.js';
+import { MAX_SIMULTANEAS } from '../../server/lib/tareas.js';
 
 /**
  * GET /api/video/config

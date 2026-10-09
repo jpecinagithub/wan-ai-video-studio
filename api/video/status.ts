@@ -1,9 +1,9 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { HttpError, requireMethod, sendError, sendOk } from '../lib/errors.js';
-import { AlibabaVideoProvider, readProviderEnv } from '../lib/provider.js';
-import type { InfoTareaProveedor } from '../lib/provider.js';
-import { marcarTerminal } from '../lib/tareas.js';
-import { StatusQuerySchema } from '../lib/validation.js';
+import { HttpError, requireMethod, sendError, sendOk } from '../../server/lib/errors.js';
+import { AlibabaVideoProvider, readProviderEnv } from '../../server/lib/provider.js';
+import type { InfoTareaProveedor } from '../../server/lib/provider.js';
+import { marcarTerminal } from '../../server/lib/tareas.js';
+import { StatusQuerySchema } from '../../server/lib/validation.js';
 
 type EstadoNormalizado = 'pendiente' | 'procesando' | 'completado' | 'error' | 'cancelado';
 

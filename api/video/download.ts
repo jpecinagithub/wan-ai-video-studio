@@ -1,5 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { HttpError, requireMethod, sendError } from '../lib/errors.js';
+import { HttpError, requireMethod, sendError } from '../../server/lib/errors.js';
 
 /**
  * GET /api/video/download?url=<encoded>&nombre=<nombre>

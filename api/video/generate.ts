@@ -1,6 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { HttpError, readJsonBody, requireMethod, sendError, sendOk } from '../lib/errors.js';
-import { AlibabaVideoProvider, readProviderEnv } from '../lib/provider.js';
+import { HttpError, readJsonBody, requireMethod, sendError, sendOk } from '../../server/lib/errors.js';
+import { AlibabaVideoProvider, readProviderEnv } from '../../server/lib/provider.js';
 import {
   guardarRespuestaIdempotente,
   hayHuecoSimultaneidad,
@@ -8,8 +8,8 @@ import {
   obtenerRespuestaIdempotente,
   registrarActiva,
   type RespuestaCreacion,
-} from '../lib/tareas.js';
-import { GenerateVideoBodySchema, formatZodIssues } from '../lib/validation.js';
+} from '../../server/lib/tareas.js';
+import { GenerateVideoBodySchema, formatZodIssues } from '../../server/lib/validation.js';
 
 const MAX_BODY_BYTES = 64 * 1024; // 64 KB: suficiente para el prompt más largo.
 const MAX_CLAVE_IDEMPOTENCIA = 256;
