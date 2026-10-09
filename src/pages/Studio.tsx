@@ -47,6 +47,7 @@ import { formatearFechaCorta } from '../utils/quota';
 import { ErrorImagen, MAX_IMAGENES_REFERENCIA, comprimirImagen } from '../utils/imagenes';
 import { guardarVideo, obtenerVideo } from '../utils/db';
 import { descargarVideo } from '../utils/download';
+import { capturarPoster } from '../utils/poster';
 
 const TAREA_PENDIENTE_KEY = 'wan-studio:tarea-pendiente';
 const CLAVE_HISTORIAL = 'wan-studio-historial-prompts';
@@ -179,6 +180,17 @@ export function Studio() {
           seguimientoDetenido: false,
         }).catch(() => undefined);
       }
+      // Póster en segundo plano: un único intento, sin bloquear la UI.
+      // Si falla (CORS, red, timeout), la tarjeta usará el vídeo en vivo o el icono.
+      capturarPoster(resp.videoUrl, 320)
+        .then(async (poster) => {
+          if (!poster) return;
+          const actual = await obtenerVideo(pendiente.taskId).catch(() => undefined);
+          if (actual) {
+            await guardarVideo({ ...actual, poster }).catch(() => undefined);
+          }
+        })
+        .catch(() => undefined);
       track('generacion_completada', {
         modelo: pendiente.params.modelId,
         duracion: pendiente.params.duration,

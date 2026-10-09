@@ -13,6 +13,7 @@ import {
   X,
 } from 'lucide-react';
 import { Button, Card, EmptyState, ErrorBanner, Loading } from '../components/ui';
+import { MiniaturaVideo } from '../components/MiniaturaVideo';
 import { VideoPlayer } from '../components/VideoPlayer';
 import { urlVigente } from '../constants/capabilities';
 import { MODELOS } from '../constants/models';
@@ -195,6 +196,17 @@ export function MisVideos() {
 
           return (
             <Card key={v.id}>
+              <div className="flex flex-col gap-4 sm:flex-row">
+                <div className="sm:w-44 sm:shrink-0 lg:w-52">
+                  <MiniaturaVideo
+                    poster={v.poster}
+                    videoUrl={v.videoUrl}
+                    urlVigente={vigente}
+                    aspecto={v.aspecto}
+                    alt={`Miniatura del vídeo generado el ${formatFecha(v.fecha)}`}
+                  />
+                </div>
+                <div className="min-w-0 flex-1">
               {/* Cabecera */}
               <div className="flex flex-wrap items-start justify-between gap-2">
                 <div className="min-w-0">
@@ -363,6 +375,8 @@ export function MisVideos() {
                   {errorDescarga.mensaje}
                 </p>
               )}
+                </div>
+              </div>
             </Card>
           );
         })}

@@ -168,4 +168,10 @@ export interface VideoRecord {
   taskIdRemoto?: string;
   /** true si el usuario dejó de seguir el polling (la tarea puede seguir en el proveedor). */
   seguimientoDetenido?: boolean;
+  /**
+   * Miniatura JPEG en dataURL capturada al completarse (~10-30 KB).
+   * Sobrevive a la caducidad de la URL temporal (24h). Opcional:
+   * los registros anteriores a esta funcionalidad no la tienen.
+   */
+  poster?: string;
 }
