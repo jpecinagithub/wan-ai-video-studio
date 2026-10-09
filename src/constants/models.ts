@@ -24,6 +24,7 @@ export const MODELOS: ModelCapability[] = [
     duracionMax: 30,
     precioPorSegundo: { '480p': 0.05, '720p': 0.1, '1080p': 0.2 },
     estadoIntegracion: 'disponible',
+    cuotaGratis: { total: 30, expira: '2026-11-04' },
   },
   {
     id: 'wan3.0-video-prime',
@@ -41,6 +42,7 @@ export const MODELOS: ModelCapability[] = [
     duracionMax: 30,
     precioPorSegundo: { '480p': 0.068, '720p': 0.14, '1080p': 0.28 },
     estadoIntegracion: 'disponible',
+    cuotaGratis: { total: 30, expira: '2026-11-20' },
   },
 ];
 

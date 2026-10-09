@@ -86,6 +86,21 @@ export interface ModelCapability {
   /** Tarifas oficiales en USD/segundo por resolución. */
   precioPorSegundo: PricePerSecond;
   estadoIntegracion: 'disponible';
+  /** Cuota gratuita del panel de Model Studio del usuario (dato de su cuenta). */
+  cuotaGratis: CuotaGratis;
+}
+
+/**
+ * Cuota gratuita promocional de un modelo.
+ * Datos del panel de Model Studio del usuario (2026-10-09), no de la API:
+ * no existe endpoint verificado para consultar el restante, así que el
+ * contador de la app es local y debe etiquetarse como tal.
+ */
+export interface CuotaGratis {
+  /** Número total de generaciones gratuitas. */
+  total: number;
+  /** Último día de validez (inclusive), formato 'YYYY-MM-DD'. */
+  expira: string;
 }
 
 export interface AppConfig {

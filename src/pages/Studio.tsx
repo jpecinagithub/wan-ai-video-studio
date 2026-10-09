@@ -20,6 +20,7 @@ import {
   Zap,
 } from 'lucide-react';
 import { Button, Card, ErrorBanner, FieldLabel, Modal, Toggle } from '../components/ui';
+import { CuotaModelo } from '../components/CuotaModelo';
 import { VideoPlayer } from '../components/VideoPlayer';
 import {
   CAPACIDADES,
@@ -30,6 +31,7 @@ import {
 } from '../constants/capabilities';
 import { MODELOS, MODELO_POR_DEFECTO, textoPrecioModelo } from '../constants/models';
 import { useLocalStorage } from '../hooks/useLocalStorage';
+import { useQuota } from '../hooks/useQuota';
 import { useTaskPolling } from '../hooks/useTaskPolling';
 import { api, ApiClientError } from '../services/api';
 import type {
@@ -40,6 +42,7 @@ import type {
   VideoStatus,
 } from '../types';
 import { cn, formatFecha, formatSeconds, newRequestId, truncate } from '../utils/format';
+import { formatearFechaCorta } from '../utils/quota';
 import { guardarVideo, obtenerVideo } from '../utils/db';
 import { descargarVideo } from '../utils/download';
 
@@ -127,6 +130,9 @@ export function Studio() {
 
   const [historial, setHistorial] = useLocalStorage<string[]>(CLAVE_HISTORIAL, []);
 
+  /* Contador local de cuota gratuita (se decrementa solo ante éxitos). */
+  const { infoCuota, registrarExito, ajustarCuota } = useQuota();
+
   const tareaActivaRef = useRef(tareaActiva);
   tareaActivaRef.current = tareaActiva;
 
@@ -138,6 +144,7 @@ export function Studio() {
   const valida = esCombinacionValida(parametros);
   const coste = estimarCoste(parametros);
   const modelo = MODELOS.find((m) => m.id === modelId);
+  const cuotaModal = infoCuota(modelId);
   const puedeGenerar = prompt.trim().length > 0 && valida && !enviando && !tareaActiva;
 
   /* ---------- Actualizaciones del polling ---------- */
@@ -171,6 +178,7 @@ export function Studio() {
         modelo: pendiente.params.modelId,
         duracion: pendiente.params.duration,
       });
+      registrarExito(pendiente.params.modelId);
       setResultado(video);
       setNombreArchivo(nombreSugerido());
       setTareaActiva(null);
@@ -197,7 +205,7 @@ export function Studio() {
     } else if (registro && registro.estado !== resp.estado) {
       await guardarVideo({ ...registro, estado: resp.estado }).catch(() => undefined);
     }
-  }, []);
+  }, [registrarExito]);
 
   const { error: errorPolling, elapsedSegundos, detener, reanudar, siguiendo } = useTaskPolling(
     tareaActiva?.taskId ?? null,
@@ -363,44 +371,58 @@ export function Studio() {
           <div className="grid gap-3 sm:grid-cols-2">
             {MODELOS.map((m) => {
               const activo = m.id === modelId;
+              const cuota = infoCuota(m.id);
               return (
-                <button
+                <div
                   key={m.id}
-                  type="button"
-                  onClick={() => seleccionarModelo(m.id)}
-                  aria-pressed={activo}
                   className={cn(
-                    'rounded-xl2 border p-4 text-left transition-all focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent',
+                    'flex flex-col rounded-xl2 border transition-all',
                     activo
                       ? 'border-accent bg-accent-soft shadow-glow'
-                      : 'border-line bg-surface-2 hover:border-muted',
+                      : 'border-line bg-surface-2',
                   )}
                 >
-                  <div className="flex items-center justify-between gap-2">
-                    <p className="font-semibold">{m.nombre}</p>
-                    {activo && <Check className="h-4 w-4 text-accent" aria-hidden="true" />}
+                  <button
+                    type="button"
+                    onClick={() => seleccionarModelo(m.id)}
+                    aria-pressed={activo}
+                    className="block w-full flex-1 rounded-t-xl2 p-4 pb-3 text-left transition-colors hover:bg-surface-2/40 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="font-semibold">{m.nombre}</p>
+                      {activo && <Check className="h-4 w-4 text-accent" aria-hidden="true" />}
+                    </div>
+                    <p className="mt-1 text-xs text-muted">{m.descripcion}</p>
+                    <ul className="mt-2 flex flex-col gap-1">
+                      {m.caracteristicas.map((c) => (
+                        <li key={c} className="flex items-start gap-1.5 text-xs text-muted">
+                          <Check className="mt-0.5 h-3 w-3 shrink-0 text-accent" aria-hidden="true" />
+                          {c}
+                        </li>
+                      ))}
+                    </ul>
+                    <div className="mt-3 flex items-center gap-1.5 text-xs text-muted">
+                      {m.velocidad === 'rápida' ? (
+                        <Zap className="h-3.5 w-3.5 text-accent" aria-hidden="true" />
+                      ) : (
+                        <Gauge className="h-3.5 w-3.5 text-accent" aria-hidden="true" />
+                      )}
+                      <span>Velocidad {m.velocidad}</span>
+                      <span aria-hidden="true">·</span>
+                      <span>{m.resoluciones.join(' / ')}</span>
+                    </div>
+                    <p className="mt-2 text-[11px] font-medium text-muted">{textoPrecioModelo(m)}</p>
+                  </button>
+                  <div className="border-t border-line/70 px-4 py-3">
+                    <CuotaModelo
+                      restantes={cuota.restantes}
+                      total={cuota.total}
+                      expiraISO={cuota.expiraISO}
+                      caducada={cuota.caducada}
+                      onAjustar={(valor) => ajustarCuota(m.id, valor)}
+                    />
                   </div>
-                  <p className="mt-1 text-xs text-muted">{m.descripcion}</p>
-                  <ul className="mt-2 flex flex-col gap-1">
-                    {m.caracteristicas.map((c) => (
-                      <li key={c} className="flex items-start gap-1.5 text-xs text-muted">
-                        <Check className="mt-0.5 h-3 w-3 shrink-0 text-accent" aria-hidden="true" />
-                        {c}
-                      </li>
-                    ))}
-                  </ul>
-                  <div className="mt-3 flex items-center gap-1.5 text-xs text-muted">
-                    {m.velocidad === 'rápida' ? (
-                      <Zap className="h-3.5 w-3.5 text-accent" aria-hidden="true" />
-                    ) : (
-                      <Gauge className="h-3.5 w-3.5 text-accent" aria-hidden="true" />
-                    )}
-                    <span>Velocidad {m.velocidad}</span>
-                    <span aria-hidden="true">·</span>
-                    <span>{m.resoluciones.join(' / ')}</span>
-                  </div>
-                  <p className="mt-2 text-[11px] font-medium text-muted">{textoPrecioModelo(m)}</p>
-                </button>
+                </div>
               );
             })}
           </div>
@@ -923,6 +945,14 @@ export function Studio() {
             <dd className="mt-0.5 font-medium">{coste.texto}</dd>
           </div>
         </dl>
+        <p className="mt-3 rounded-xl2 bg-surface-2 p-3 text-xs leading-relaxed text-muted">
+          Cuota gratuita de este modelo: {cuotaModal.restantes} de {cuotaModal.total} restantes{' '}
+          <span className="text-muted/70">(contador local)</span>. Tras esta generación te quedarán{' '}
+          {Math.max(0, cuotaModal.restantes - 1)} de {cuotaModal.total} gratuitas en este modelo.
+          {cuotaModal.caducada && (
+            <> La cuota gratuita caducó el {formatearFechaCorta(cuotaModal.expiraISO)}.</>
+          )}
+        </p>
         {errorEnvio && (
           <div className="mt-3">
             <ErrorBanner titulo="No se pudo iniciar la generación" mensaje={errorEnvio} />

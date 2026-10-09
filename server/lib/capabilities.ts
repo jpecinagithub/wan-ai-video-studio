@@ -22,6 +22,11 @@ export interface CapacidadModelo {
   /** USD por segundo de vídeo generado, por resolución. */
   precioPorSegundo: Record<ResolucionApi, number>;
   estadoIntegracion: EstadoIntegracion;
+  /**
+   * Cuota gratuita del panel de Model Studio del usuario (dato de su cuenta,
+   * 2026-10-09). No es sensible: se expone en GET /api/video/models.
+   */
+  cuotaGratis: { total: number; expira: string };
 }
 
 export const MODELOS: CapacidadModelo[] = [
@@ -41,6 +46,7 @@ export const MODELOS: CapacidadModelo[] = [
     duracionMax: 30,
     precioPorSegundo: { '480p': 0.05, '720p': 0.1, '1080p': 0.2 },
     estadoIntegracion: 'disponible',
+    cuotaGratis: { total: 30, expira: '2026-11-04' },
   },
   {
     id: 'wan3.0-video-prime',
@@ -58,6 +64,7 @@ export const MODELOS: CapacidadModelo[] = [
     duracionMax: 30,
     precioPorSegundo: { '480p': 0.068, '720p': 0.14, '1080p': 0.28 },
     estadoIntegracion: 'disponible',
+    cuotaGratis: { total: 30, expira: '2026-11-20' },
   },
 ];
 
