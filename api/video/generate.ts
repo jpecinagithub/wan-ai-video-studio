@@ -1,34 +1,44 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { HttpError, readJsonBody, requireMethod, sendError, sendOk } from '../../server/lib/errors.js';
-import { AlibabaVideoProvider, readProviderEnv } from '../../server/lib/provider.js';
 import {
-  guardarRespuestaIdempotente,
-  hayHuecoSimultaneidad,
-  MAX_SIMULTANEAS,
-  obtenerRespuestaIdempotente,
-  reconciliarActivas,
-  registrarActiva,
-  type RespuestaCreacion,
-} from '../../server/lib/tareas.js';
+  estimarCostePollen,
+  obtenerCapacidad,
+  validarCombinacion,
+} from '../../server/lib/capabilities.js';
+import { HttpError, readJsonBody, requireMethod, sendError, sendOk } from '../../server/lib/errors.js';
+import { PollinationsVideoProvider, readProviderEnv } from '../../server/lib/provider.js';
 import { GenerateVideoBodySchema, formatZodIssues } from '../../server/lib/validation.js';
 
-const MAX_BODY_BYTES = 4 * 1024 * 1024; // 4 MB: prompt + hasta 10 imágenes de referencia comprimidas (~300 KB c/u). Límite duro de Vercel Hobby ≈ 4.5 MB.
-const MAX_CLAVE_IDEMPOTENCIA = 256;
+/**
+ * Límite del cuerpo: solo JSON con parámetros (las imágenes viajan como
+ * URLs públicas ya alojadas). Muy por debajo del límite de Vercel.
+ */
+const MAX_BODY_BYTES = 256 * 1024;
+
+/** Los enlaces del almacenamiento de medios del proveedor duran 30 días. */
+const DIAS_VIGENCIA_URL = 30;
 
 /**
  * POST /api/video/generate
- * Valida la petición, aplica idempotencia y el límite de simultaneidad,
- * y crea la tarea en Alibaba Cloud Model Studio (modo real, sin demo).
- * Devuelve el identificador de tarea y el estado inicial (nunca espera al vídeo).
+ *
+ * La generación en Pollinations es SÍNCRONA: este endpoint intenta la
+ * petición completa (generar + publicar el MP4). Si el proveedor tarda más
+ * que el timeout propio, responde 202 {estado:'procesando'} y el cliente
+ * reintente la petición IDÉNTICA (mismos parámetros y seed): el proveedor
+ * retoma la generación en curso o devuelve el resultado cacheado SIN
+ * volver a facturar. Solo la generación se factura; reintentos y cache no.
+ *
+ * No hay límite de simultaneidad propio: el proveedor aplica el suyo (429).
+ * Modo real, sin demo (decisión expresa del usuario).
  */
 export default async function handler(req: VercelRequest, res: VercelResponse): Promise<void> {
   try {
     if (!requireMethod(req, res, 'POST')) return;
+    res.setHeader('Cache-Control', 'no-store');
 
     const cuerpo = readJsonBody(
       req,
       MAX_BODY_BYTES,
-      'La solicitud es demasiado grande (máx. 4 MB). Reduce el número o el tamaño de las imágenes de referencia.',
+      'La solicitud es demasiado grande. Las imágenes deben subirse primero con /api/video/media.',
     );
     const parsed = GenerateVideoBodySchema.safeParse(cuerpo);
     if (!parsed.success) {
@@ -41,39 +51,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
     }
     const datos = parsed.data;
 
-    // Clave de idempotencia: del body o de la cabecera X-Idempotency-Key.
-    const cabecera = req.headers['x-idempotency-key'];
-    const claveCabecera = (Array.isArray(cabecera) ? cabecera[0] : cabecera)?.trim();
-    const claveIdempotencia =
-      datos.clientRequestId ??
-      (claveCabecera && claveCabecera.length <= MAX_CLAVE_IDEMPOTENCIA ? claveCabecera : undefined);
-
-    if (claveIdempotencia) {
-      const repetida = obtenerRespuestaIdempotente(claveIdempotencia);
-      if (repetida) {
-        sendOk(res, repetida, 200);
-        return;
-      }
-    }
+    validarCombinacion(datos.modelId, datos.duration, datos.resolution, datos.imageUrls?.length ?? 0);
 
     const env = readProviderEnv();
-    const proveedor = new AlibabaVideoProvider(env);
+    const proveedor = new PollinationsVideoProvider(env);
 
-    // Si no hay hueco, se reconcilia con el estado real del proveedor antes
-    // de rechazar: las tareas que ya terminaron allí liberan su hueco aunque
-    // el navegador se cerrara a mitad del seguimiento.
-    if (!hayHuecoSimultaneidad()) {
-      await reconciliarActivas((taskId) => proveedor.obtenerTareaVideo(taskId));
-    }
-    if (!hayHuecoSimultaneidad()) {
-      throw new HttpError(
-        429,
-        'RATE_LIMITED',
-        `Has alcanzado el límite de ${MAX_SIMULTANEAS} generaciones simultáneas. Espera a que termine alguna antes de crear otra.`,
-      );
-    }
-
-    const tarea = await proveedor.crearTareaVideo({
+    const resultado = await proveedor.generarVideo({
       modelId: datos.modelId,
       prompt: datos.prompt,
       duracionSegundos: datos.duration,
@@ -81,22 +64,49 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
       aspecto: datos.aspectRatio,
       audio: datos.audio,
       semilla: datos.seed,
-      mejoraPrompt: datos.enhancePrompt,
-      marcaAgua: datos.watermark,
-      idPeticionCliente: datos.clientRequestId,
-      media: datos.media,
+      imagenes: datos.imageUrls,
     });
 
-    const respuesta: RespuestaCreacion = {
-      taskId: tarea.taskId,
-      estado: 'pendiente',
-      mensaje: 'Tarea creada. Consulta el estado periódicamente.',
-    };
+    if (resultado.estado === 'procesando') {
+      sendOk(
+        res,
+        {
+          estado: 'procesando',
+          mensaje:
+            'El vídeo se está generando en Pollinations. Reintentando automáticamente sin coste adicional…',
+        },
+        202,
+      );
+      return;
+    }
 
-    registrarActiva(tarea.taskId);
-    if (claveIdempotencia) guardarRespuestaIdempotente(claveIdempotencia, respuesta);
+    // Publicar el MP4 en el almacenamiento del proveedor: URL pública
+    // estable (30 días) para reproducir, descargar e historiar.
+    const nombre = `video-${Date.now()}.mp4`;
+    const videoUrl = await proveedor.subirMedio(resultado.datos, resultado.contentType, nombre);
 
-    sendOk(res, respuesta, 201);
+    const modelo = obtenerCapacidad(datos.modelId);
+    const costePollen = estimarCostePollen(
+      datos.modelId,
+      datos.resolution,
+      datos.duration,
+      datos.audio,
+    );
+
+    sendOk(res, {
+      estado: 'completado',
+      mensaje: 'Vídeo generado correctamente.',
+      videoUrl,
+      expiraEn: new Date(Date.now() + DIAS_VIGENCIA_URL * 24 * 60 * 60 * 1000).toISOString(),
+      costePollen,
+      metadatos: {
+        modelo: datos.modelId,
+        nombreModelo: modelo?.nombre,
+        duracion: datos.duration,
+        resolucion: datos.resolution,
+        aspecto: datos.aspectRatio,
+      },
+    });
   } catch (err) {
     sendError(res, err);
   }

@@ -4,19 +4,14 @@ import { HttpError, requireMethod, sendError } from '../../server/lib/errors.js'
 /**
  * GET /api/video/download?url=<encoded>&nombre=<nombre>
  *
- * Proxy de descarga de vídeos: hace fetch a la URL temporal del proveedor y
- * transmite el cuerpo por streaming SIN cargarlo en memoria, con cabeceras
- * de descarga forzada. Solo acepta hosts de la infraestructura de Alibaba
- * Cloud (lista cerrada) para evitar usos como proxy abierto.
+ * Proxy de descarga de vídeos: hace fetch a la URL pública del
+ * almacenamiento de medios de Pollinations y transmite el cuerpo por
+ * streaming SIN cargarlo en memoria, con cabeceras de descarga forzada.
+ * Solo acepta el host del almacenamiento del proveedor (lista cerrada)
+ * para evitar usos como proxy abierto.
  */
 
-const HOSTS_PERMITIDOS = [
-  '.aliyuncs.com',
-  'dashscope.aliyuncs.com',
-  'dashscope-intl.aliyuncs.com',
-  'dashscope-us.aliyuncs.com',
-  'maas.aliyuncs.com',
-];
+const HOSTS_PERMITIDOS = ['media.pollinations.ai'];
 
 const MAX_LONGITUD_NOMBRE = 100;
 

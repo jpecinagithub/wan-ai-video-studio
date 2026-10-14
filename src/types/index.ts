@@ -2,34 +2,23 @@
  * Tipos compartidos del frontend de WAN AI Video Studio.
  * No contienen secretos ni lógica de proveedor.
  *
- * Fuente de verdad de capacidades: documentación oficial de
- * Alibaba Cloud Model Studio (verificada 2026-10-09).
+ * Fuente de verdad de capacidades: catálogo en vivo de Pollinations
+ * (GET /video/models, verificado 2026-10-14). Precios en pollen;
+ * $1 ≈ 1 pollen (FAQ oficial de Pollinations).
  */
 
 export type VideoStatus = 'pendiente' | 'procesando' | 'completado' | 'error' | 'cancelado';
 
-export type ModelId = 'wan3.0-video' | 'wan3.0-video-prime';
+export type ModelId = 'bytedance/seedance-1-pro-fast' | 'google/veo-3.1-fast';
 
-/** Etiquetas de la UI. El backend las mapea a '480P' | '720P' | '1080P' (formato oficial). */
+/** Resoluciones de la UI (cada modelo admite un subconjunto). */
 export type Resolution = '480p' | '720p' | '1080p';
 
 /**
  * Relaciones de aspecto de la UI.
- * 'auto' se mapea en el backend a 'adaptive' (valor oficial).
- * El resto se envía tal cual ('16:9', '9:16', '1:1', '4:3', '3:4', '21:9').
+ * Los modelos de vídeo de Pollinations soportan 16:9 y 9:16.
  */
-export type AspectRatio = '16:9' | '9:16' | '1:1' | '4:3' | '3:4' | '21:9' | 'auto';
-
-/**
- * Imagen de referencia para la generación (verificado en la documentación
- * oficial de Model Studio 2026-10-09: `type: "reference_image"`, máx. 10;
- * en el prompt se mencionan como "Image 1", "Image 2", ...).
- * Se envía como data URI base64 (sin hosting externo).
- */
-export interface MediaReferencia {
-  type: 'reference_image';
-  url: string; // data:image/{jpeg|png|webp|bmp};base64,...
-}
+export type AspectRatio = '16:9' | '9:16';
 
 export interface GenerationRequest {
   prompt: string;
@@ -38,53 +27,43 @@ export interface GenerationRequest {
   resolution: Resolution;
   aspectRatio: AspectRatio;
   audio: boolean;
+  /** Semilla explícita: hace que los reintentos sean peticiones idénticas. */
   seed?: number;
-  enhancePrompt?: boolean;
-  watermark?: boolean;
-  clientRequestId: string;
-  /** Imágenes de referencia (opcional, máx. 10). No se persisten en el historial. */
-  media?: MediaReferencia[];
+  /**
+   * URLs públicas https de imágenes ya alojadas (vía /api/video/media).
+   * [0] = fotograma inicial, [1] = fotograma final (solo Veo).
+   * No se persisten en el historial.
+   */
+  imageUrls?: string[];
 }
 
+/**
+ * Respuesta de POST /api/video/generate.
+ * - 'completado': el vídeo está listo (videoUrl pública, 30 días).
+ * - 'procesando': el proveedor sigue generando; el cliente debe reintentar
+ *   la petición IDÉNTICA (el proveedor la retoma sin volver a facturar).
+ */
 export interface GenerationResponse {
-  taskId: string;
-  estado: VideoStatus;
-  mensaje: string;
-}
-
-export interface TaskUsage {
-  duracion?: number;
-  fps?: number;
-  ratio?: string;
-}
-
-export interface TaskStatusResponse {
-  taskId: string;
-  estado: VideoStatus;
+  estado: 'completado' | 'procesando';
   videoUrl?: string;
-  mensaje?: string;
-  error?: string;
-  /** Fecha ISO estimada de caducidad de la URL temporal (24h desde la finalización). */
+  /** Fecha ISO de caducidad estimada de la URL (30 días). */
   expiraEn?: string;
+  mensaje?: string;
+  /** Coste estimado en pollen (solo cuando está completado). */
+  costePollen?: number;
   metadatos?: {
     modelo?: ModelId;
+    nombreModelo?: string;
     duracion?: number;
     resolucion?: Resolution;
     aspecto?: AspectRatio;
-    uso?: TaskUsage;
   };
 }
 
 /** Indicador orientativo de velocidad de generación. */
 export type SpeedHint = 'rápida' | 'muy rápida';
 
-/**
- * Tarifas oficiales por segundo de vídeo generado (text-to-video:
- * se factura la duración de salida). Región: Singapur (scope internacional).
- * Fuente: página oficial de precios de Model Studio (2026-10-09).
- * Nota: existe un "30% de descuento por tiempo limitado" sin fecha de fin
- * publicada; se usa la tarifa de lista como estimación conservadora.
- */
+/** Pollen por segundo de vídeo generado, por resolución. */
 export type PricePerSecond = Record<Resolution, number>;
 
 export interface ModelCapability {
@@ -94,40 +73,38 @@ export interface ModelCapability {
   caracteristicas: string[];
   velocidad: SpeedHint;
   resoluciones: Resolution[];
-  duracionMin: number;
-  duracionMax: number;
-  /** Tarifas oficiales en USD/segundo por resolución. */
-  precioPorSegundo: PricePerSecond;
+  resolucionDefecto: Resolution;
+  /** Duraciones permitidas en segundos (lista cerrada por modelo). */
+  duraciones: number[];
+  duracionDefecto: number;
+  /** 1 = solo fotograma inicial; 2 = inicial + final. */
+  maxImagenes: number;
+  /** El modelo puede generar pista de audio. */
+  generaAudio: boolean;
+  /** Pollen por segundo de vídeo, por resolución. */
+  precioVideoPorSegundo: PricePerSecond;
+  /** Pollen por segundo de audio (0 si no aplica). */
+  precioAudioPorSegundo: number;
   estadoIntegracion: 'disponible';
-  /** Cuota gratuita del panel de Model Studio del usuario (dato de su cuenta). */
-  cuotaGratis: CuotaGratis;
-}
-
-/**
- * Cuota gratuita promocional de un modelo.
- * Datos del panel de Model Studio del usuario (2026-10-09), no de la API:
- * no existe endpoint verificado para consultar el restante, así que el
- * contador de la app es local y debe etiquetarse como tal.
- */
-export interface CuotaGratis {
-  /** Número total de generaciones gratuitas. */
-  total: number;
-  /** Último día de validez (inclusive), formato 'YYYY-MM-DD'. */
-  expira: string;
 }
 
 export interface AppConfig {
   limites: {
     promptMax: number;
-    duracionMin: number;
-    duracionMax: number;
     resoluciones: Resolution[];
-    generacionesSimultaneas: number;
+    relacionesAspecto: AspectRatio[];
+    modelos: Array<{
+      id: ModelId;
+      duraciones: number[];
+      resoluciones: Resolution[];
+      maxImagenes: number;
+    }>;
   };
   integracion: {
     estado: 'disponible';
     /** Este proyecto NO tiene modo demo por decisión expresa del usuario. */
     modoDemo: false;
+    proveedor: string;
     modelos: ModelId[];
   };
 }
@@ -162,15 +139,19 @@ export interface VideoRecord {
   aspecto: AspectRatio;
   estado: VideoStatus;
   videoUrl?: string;
-  /** Fecha ISO de caducidad estimada de la URL temporal (24h). */
+  /** Fecha ISO de caducidad estimada de la URL (30 días). */
   expiraEn?: string;
   nombre: string;
-  taskIdRemoto?: string;
-  /** true si el usuario dejó de seguir el polling (la tarea puede seguir en el proveedor). */
+  /**
+   * Solicitud exacta de generación (para reanudar el seguimiento o
+   * reintentar de forma idéntica sin volver a facturar).
+   */
+  solicitud?: GenerationRequest;
+  /** true si el usuario dejó de seguir la generación (puede seguir en el proveedor). */
   seguimientoDetenido?: boolean;
   /**
    * Miniatura JPEG en dataURL capturada al completarse (~10-30 KB).
-   * Sobrevive a la caducidad de la URL temporal (24h). Opcional:
+   * Sobrevive a la caducidad de la URL (30 días). Opcional:
    * los registros anteriores a esta funcionalidad no la tienen.
    */
   poster?: string;

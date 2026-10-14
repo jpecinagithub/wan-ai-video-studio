@@ -14,12 +14,7 @@ import { cn, formatSeconds } from '../utils/format';
 
 const ASPECTO_CSS: Record<AspectRatio, string> = {
   '16:9': '16 / 9',
-  '21:9': '21 / 9',
   '9:16': '9 / 16',
-  '1:1': '1 / 1',
-  '4:3': '4 / 3',
-  '3:4': '3 / 4',
-  auto: '16 / 9',
 };
 
 interface VideoPlayerProps {

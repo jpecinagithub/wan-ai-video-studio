@@ -1,34 +1,40 @@
 # WAN AI Video Studio
 
 Estudio serverless de generación de vídeo con inteligencia artificial: transforma
-descripciones de texto en vídeos mediante los modelos **WAN 3.0 Video** (`wan3.0-video`) y
-**WAN 3.0 Video Prime** (`wan3.0-video-prime`) de **Alibaba Cloud Model Studio**.
+descripciones de texto en vídeos mediante los modelos de vídeo de **Pollinations**
+(**Seedance Pro Fast** de ByteDance y **Veo 3.1 Fast** de Google).
 
 Interfaz en **español**, mobile-first, tema oscuro, instalable como PWA. Sin cuentas de
 usuario: tus prompts, favoritos e historial viven únicamente en tu dispositivo.
 
-> **Estado de la integración con el proveedor:** integración real con **Alibaba Cloud
-> Model Studio** implementada y verificada contra la documentación oficial vigente
-> (2026-10-09). `POST /api/video/generate` crea tareas reales de generación asíncrona;
-> `GET /api/video/status/:taskId` consulta su estado hasta completarse.
+> **Estado de la integración con el proveedor:** integración real con **Pollinations**
+> (gen.pollinations.ai) implementada y verificada contra su documentación y su catálogo
+> en vivo (2026-10-14). `POST /api/video/generate` genera el vídeo de forma síncrona y
+> devuelve su URL pública; ante respuestas 202 el cliente reintente la petición idéntica,
+> que el proveedor retoma sin volver a facturar.
 >
 > Por decisión expresa, este proyecto **no incluye modo demo**: solo existe el modo real.
 > Las pruebas automatizadas usan respuestas simuladas del proveedor (mocks solo en tests).
 
 ## Características
 
-- **Estudio de generación**: prompt, modelo, duración (2–30 s), resolución
-  (480p / 720p / 1080p), relación de aspecto (16:9, 21:9, 9:16, 1:1, 4:3, 3:4, auto) y audio.
-- **Estimación de coste** antes de generar (tarifa oficial por segundo × duración), siempre
-  etiquetada como estimación.
+- **Estudio de generación**: prompt, modelo, duración (según modelo: 2–10 s en Seedance,
+  4/6/8 s en Veo), resolución (480p / 720p / 1080p según modelo), relación de aspecto
+  (16:9, 9:16), audio y semilla.
+- **Imagen a vídeo**: hasta 1 imagen (fotograma inicial) en Seedance y 2 (inicial + final)
+  en Veo. Se comprimen en el navegador y se suben al almacenamiento del proveedor antes
+  de generar.
+- **Estimación de coste** en pollen antes de generar (tarifa por segundo × duración),
+  siempre etiquetada como estimación. $1 ≈ 1 pollen.
+- **Reintentos idempotentes**: si la generación tarda más que el timeout de la función,
+  el cliente reintente la petición idéntica (mismos parámetros y seed); el proveedor la
+  retoma sin volver a facturar. Puedes dejar de seguir y reanudar desde «Mis vídeos».
 - **Biblioteca de prompts**: 30 ejemplos en 10 categorías, con favoritos locales y
   reutilización con un clic.
 - **Mis vídeos**: historial local de hasta 20 vídeos con reproducción inline, descarga
   (con nombre personalizable), reutilización del prompt, «nueva versión» y eliminación en
-  dos pasos. Los enlaces del proveedor caducan a las 24h: la app lo indica y nunca promete
-  reproducción tras la caducidad.
-- **Reanudación de seguimiento**: si cierras el navegador durante una generación, puedes
-  retomarla desde Mis vídeos.
+  dos pasos. Los enlaces del almacenamiento caducan a los 30 días: la app lo indica y
+  nunca promete reproducción tras la caducidad.
 - **PWA instalable** con página offline honesta (generar vídeos requiere conexión).
 - Telemetría mínima y anónima con Vercel Analytics: solo eventos genéricos
   (p. ej. `descarga`), nunca prompts ni URLs.
@@ -45,7 +51,8 @@ usuario: tus prompts, favoritos e historial viven únicamente en tu dispositivo.
 
 - Node.js 18 o superior (recomendado 20+)
 - npm
-- Una cuenta de Alibaba Cloud Model Studio con cuota disponible
+- Una cuenta de Pollinations con **Pollen de pago** (los modelos de vídeo no admiten
+  Pollen gratuito/de quests): https://enter.pollinations.ai
 - Cuenta de Vercel (para el despliegue)
 
 ## Instalación
@@ -60,7 +67,7 @@ npm install
 
 # 3. Copiar las variables de entorno para desarrollo local
 cp .env.example .env.local
-# Edita .env.local y pon tu ALIBABA_API_KEY (solo servidor)
+# Edita .env.local y pon tu POLLINATIONS_API_KEY (solo servidor)
 ```
 
 ## Variables de entorno
@@ -68,20 +75,10 @@ cp .env.example .env.local
 Solo se usan en el servidor (funciones `api/`). Ninguna lleva el prefijo `VITE_`, que las
 expondría en el código del cliente.
 
-| Variable | Obligatoria | Defecto | Descripción |
-|---|---|---|---|
-| `ALIBABA_API_KEY` | **Sí** (solo servidor) | — | Clave de API de Model Studio. Créala en la consola de Model Studio. |
-| `ALIBABA_REGION` | No | `ap-southeast-1` | Región de Model Studio. |
-| `ALIBABA_WORKSPACE_ID` | No | — | Workspace ID; permite construir la URL base regional. |
-| `ALIBABA_API_BASE_URL` | No | — | URL base completa de la API. **Prioridad máxima**: si está definida, sustituye a la construcción por región/workspace. |
-| `VITE_APP_NAME` | No | — | Nombre público de la app (visible en el cliente, no sensible). |
-
-**Orden de resolución de la URL base**: `ALIBABA_API_BASE_URL` → (región + workspace) → región
-por defecto.
-
-⚠️ **Importante**: el modelo, la clave y la región deben pertenecer a la misma región/scope
-de Alibaba Cloud: una clave creada para otra región no funcionará. Si cambias de región,
-regenera la clave en esa región.
+| Variable | Obligatoria | Descripción |
+|---|---|---|
+| `POLLINATIONS_API_KEY` | **Sí** (solo servidor) | Clave `sk_` de Pollinations. Créala en enter.pollinations.ai/keys. |
+| `VITE_APP_NAME` | No | Nombre público de la app (visible en el cliente, no sensible). |
 
 ## Desarrollo local
 
@@ -131,10 +128,7 @@ Nunca subas `.env.local` ni ninguna clave al repositorio (están en `.gitignore`
 En el panel del proyecto → **Settings → Environment Variables**, añade para el entorno
 **Production** (y Preview si quieres probar ramas):
 
-- `ALIBABA_API_KEY` = tu clave de Model Studio
-- `ALIBABA_REGION` = `ap-southeast-1` (o tu región)
-- `ALIBABA_WORKSPACE_ID` = (opcional)
-- `ALIBABA_API_BASE_URL` = (opcional, prioridad máxima)
+- `POLLINATIONS_API_KEY` = tu clave `sk_` de Pollinations
 
 Tras guardarlas, **redeploy** el proyecto para que las funciones las recojan.
 
@@ -155,58 +149,51 @@ Ambos responden JSON sin exponer ninguna variable de entorno.
 ## Prueba real de generación
 
 ```bash
-# 1. Crear la tarea (responde 201 con el taskId, sin esperar al vídeo)
+# Generar un vídeo (la respuesta puede tardar ~1 min; ante un 202,
+# reintente la MISMA petición: el proveedor la retoma sin volver a facturar)
 curl -X POST https://TU-DOMINIO/api/video/generate \
   -H 'Content-Type: application/json' \
   -d '{
     "prompt": "A cinematic aerial shot of a medieval castle at sunrise, slow camera movement.",
-    "modelId": "wan3.0-video",
-    "duration": 5,
+    "modelId": "bytedance/seedance-1-pro-fast",
+    "duration": 8,
     "resolution": "720p",
     "aspectRatio": "16:9",
-    "audio": true
+    "audio": true,
+    "seed": 123456
   }'
 
-# Respuesta: { "taskId": "...", "estado": "pendiente", "mensaje": "..." }
-
-# 2. Consultar el estado cada ~15 segundos hasta "completado"
-curl https://TU-DOMINIO/api/video/status/TU_TASK_ID
-
-# 3. Cuando estado = "completado", la respuesta incluye "videoUrl"
-#    (enlace temporal del proveedor, válido 24h): descárgalo cuanto antes.
+# Respuesta 200: { "estado": "completado", "videoUrl": "https://media.pollinations.ai/…",
+#   "expiraEn": "…", "costePollen": 0.2, … }
+# Respuesta 202: { "estado": "procesando", "mensaje": "…" } → reintentar idéntico.
 ```
 
 > La generación tarda varios minutos. El vídeo real de extremo a extremo se prueba
-> tras el despliegue en Vercel, con `ALIBABA_API_KEY` configurada.
+> tras el despliegue en Vercel, con `POLLINATIONS_API_KEY` configurada y saldo de
+> Pollen de pago.
 
 Notas:
 
-- La generación tarda **varios minutos**: consulta el estado con pausas de ~15 s.
-- Las URLs de vídeo del proveedor **caducan a las 24h**: descarga el resultado en cuanto
-  esté listo. La app muestra «Enlace válido hasta …» y avisa cuando ha caducado.
+- Las URLs de vídeo del almacenamiento **caducan a los 30 días**: descarga el resultado
+  en cuanto esté listo. La app muestra «Enlace válido hasta …» y avisa cuando ha caducado.
+- Las peticiones fallidas **no se facturan**.
 
 ## Costes
 
-Tarifas oficiales de Model Studio por segundo de vídeo generado (text-to-video: se
-factura la duración de salida), región **Singapur / scope internacional**, verificadas el
-2026-10-09. El audio no afecta al precio y las peticiones fallidas no se facturan.
+Tarifas en **pollen por segundo de vídeo generado**, verificadas contra el catálogo en
+vivo de Pollinations (2026-10-14). $1 ≈ 1 pollen (FAQ oficial).
 
-| Modelo | 480p | 720p | 1080p |
-|---|---|---|---|
-| WAN 3.0 Video (`wan3.0-video`) | $0,05/s | $0,10/s | $0,20/s |
-| WAN 3.0 Video Prime (`wan3.0-video-prime`) | $0,068/s | $0,14/s | $0,28/s |
+| Modelo | 480p | 720p | 1080p | Audio |
+|---|---|---|---|---|
+| Seedance Pro Fast (`bytedance/seedance-1-pro-fast`) | 0,015/s | 0,025/s | 0,06/s | — |
+| Veo 3.1 Fast (`google/veo-3.1-fast`) | — | 0,08/s | 0,10/s | +0,02/s |
 
-**Fórmula**: `coste estimado ≈ duración (s) × tarifa del modelo y resolución`.
+**Fórmula**: `coste estimado ≈ duración (s) × tarifa del modelo y resolución (+ audio)`.
 
 Ejemplos:
 
-- 5 s, 720p, WAN 3.0 Video → 5 × $0,10 = **≈ $0,50 USD**
-- 10 s, 1080p, WAN 3.0 Video Prime → 10 × $0,28 = **≈ $2,80 USD**
-
-Existe un descuento promocional del 30% anunciado por el proveedor sin fecha de fin
-publicada; la app usa la tarifa de lista como estimación conservadora. Además, cada
-cuenta dispone de **cuota gratuita** (30 generaciones en cada modelo, con fecha de
-caducidad visible en tu panel de Model Studio).
+- 8 s, 720p, Seedance Pro Fast → 8 × 0,025 = **≈ 0,20 pollen (≈ $0,20 USD)**
+- 8 s, 720p, Veo 3.1 Fast con audio → 8 × (0,08 + 0,02) = **≈ 0,80 pollen (≈ $0,80 USD)**
 
 ## PWA
 
@@ -220,13 +207,16 @@ ocurre en la nube y no puede funcionar sin conexión.
 api/
   video/
     config.ts    # GET  /api/video/config   — límites y estado (sin secretos)
-    generate.ts  # POST /api/video/generate — valida y crea la tarea (202 + taskId)
+    generate.ts  # POST /api/video/generate — genera (200) o 202 para reintentar idéntico
+    media.ts     # POST /api/video/media    — sube una imagen de referencia
     models.ts    # GET  /api/video/models   — modelos y capacidades (sin secretos)
-    status.ts    # GET  /api/video/status/:taskId — estado normalizado de la tarea
+    download.ts  # GET  /api/video/download — proxy de descarga (solo media.pollinations.ai)
+server/
   lib/
-    provider.ts    # Integración real con Alibaba Cloud Model Studio
+    provider.ts    # Integración real con Pollinations (vídeo + almacenamiento)
     validation.ts  # Esquemas zod de entrada
-    errors.ts      # Errores HTTP honestos
+    errors.ts      # Errores HTTP honestos (mapeo del proveedor)
+    capabilities.ts# Modelos, validación de combinaciones, coste en pollen
 src/
   pages/
     Studio.tsx      # Pantalla principal: configurar y generar
@@ -238,15 +228,16 @@ src/
     VideoPlayer.tsx # Reproductor de vídeo
     ui.tsx          # Botones, tarjetas, estados vacíos, banners
   constants/
-    models.ts       # Ficha de los 2 modelos (tarifas verificadas 2026-10-09)
-    capabilities.ts # Límites, estimación de coste, urlVigente()
+    models.ts       # Ficha de los 2 modelos (precios verificados 2026-10-14)
+    capabilities.ts # Límites, estimación de coste en pollen, urlVigente()
     prompts.ts      # PROMPTS y CATEGORIAS de la biblioteca
   utils/
     db.ts           # Historial de vídeos (evicción a 20 registros)
     download.ts     # Descarga directa con fallback a proxy serverless
     format.ts       # cn, formatSeconds, formatFecha, truncate
+    imagenes.ts     # Compresión de imágenes de referencia en el navegador
   services/api.ts   # Cliente HTTP del frontend
-  hooks/            # useLocalStorage, useTheme
+  hooks/            # useGeneracion (reintentos idempotentes), useLocalStorage, useTheme
 public/
   offline.html      # Página sin conexión
 ```
@@ -254,18 +245,20 @@ public/
 ## Notas de seguridad
 
 - **Ningún secreto lleva el prefijo `VITE_`**: todo lo que empiece por `VITE_` se incrusta
-  en el bundle del cliente. La `ALIBABA_API_KEY` solo existe en el servidor.
-- **Límite de 64 KB** en el cuerpo de `POST /api/video/generate`: peticiones mayores se
-  rechazan antes de validar.
-- **Idempotencia**: envía `clientRequestId` (UUID) en la generación; el servidor lo usa
-  para deduplicar reintentos del cliente.
+  en el bundle del cliente. La `POLLINATIONS_API_KEY` solo existe en el servidor.
+- **Límite de 256 KB** en el cuerpo de `POST /api/video/generate` y **1 MB** en
+  `POST /api/video/media`: las imágenes viajan como URLs ya alojadas, nunca como base64
+  en la generación.
+- **Idempotencia por diseño**: la petición de generación (parámetros + seed + URLs de
+  imagen) es su propio identificador; reintentarla no duplica la facturación.
+- El proxy de descarga solo acepta el host `media.pollinations.ai` (lista cerrada).
 - Los endpoints públicos (`/models`, `/config`) **nunca devuelven secretos** ni variables
   de entorno.
 - El historial de vídeos y los favoritos se guardan solo en el dispositivo del usuario
   (IndexedDB / localStorage); el servidor no persiste datos de usuario.
 - La telemetría (Vercel Analytics) registra únicamente eventos genéricos
-  (`descarga` con el modelo): nunca prompts, URLs ni identificadores de tarea.
+  (`descarga` con el modelo): nunca prompts ni URLs.
 
 ---
 
-Created by Jon Peciña Iturbe · WAN AI Video Studio v0.1.0
+Created by Jon Peciña Iturbe · WAN AI Video Studio v0.2.0

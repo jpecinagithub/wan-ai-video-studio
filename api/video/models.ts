@@ -4,7 +4,7 @@ import { MONEDA_PRECIOS, MODELOS } from '../../server/lib/capabilities.js';
 
 /**
  * GET /api/video/models
- * Devuelve los modelos disponibles y sus capacidades oficiales.
+ * Devuelve los modelos disponibles y sus capacidades (precios en pollen).
  * No expone secretos ni detalles internos del proveedor.
  */
 export default async function handler(req: VercelRequest, res: VercelResponse): Promise<void> {
@@ -14,8 +14,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
     sendOk(res, {
       modelos: MODELOS,
       moneda: MONEDA_PRECIOS,
-      unidadPrecio: 'segundo de vídeo generado',
-      nota: 'Las peticiones fallidas no se facturan.',
+      equivalencia: '$1 ≈ 1 pollen (FAQ oficial de Pollinations)',
+      unidadPrecio: 'pollen por segundo de vídeo generado',
+      nota: 'Las peticiones fallidas no se facturan. Los modelos de vídeo requieren Pollen de pago.',
     });
   } catch (err) {
     sendError(res, err);

@@ -1,44 +1,50 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { HttpError } from './errors.js';
-import { AlibabaVideoProvider, readProviderEnv } from './provider.js';
+import {
+  PollinationsVideoProvider,
+  decodificarDataUrl,
+  readProviderEnv,
+} from './provider.js';
 
-const ENV = {
-  apiKey: 'sk-test',
-  region: 'ap-southeast-1',
-  baseUrl: 'https://dashscope-intl.aliyuncs.com/api/v1',
-};
+const ENV = { apiKey: 'sk_test_123' };
 
-function respuestaJson(payload: unknown, status = 200): Response {
-  return new Response(JSON.stringify(payload), {
+function respuestaVideo(bytes: Uint8Array, status = 200): Response {
+  return new Response(bytes, {
+    status,
+    headers: { 'Content-Type': 'video/mp4' },
+  });
+}
+
+function respuestaErrorJson(status: number, code: string, message: string): Response {
+  return new Response(JSON.stringify({ status, success: false, error: { code, message } }), {
     status,
     headers: { 'Content-Type': 'application/json' },
   });
 }
 
 const entradaBase = {
-  modelId: 'wan3.0-video' as const,
+  modelId: 'google/veo-3.1-fast' as const,
   prompt: 'Un castillo medieval al amanecer, plano aéreo cinematográfico.',
-  duracionSegundos: 5,
+  duracionSegundos: 8,
   resolucion: '720p' as const,
-  aspecto: '16:9',
+  aspecto: '16:9' as const,
   audio: true,
+  semilla: 42,
+  imagenes: ['https://media.pollinations.ai/abc1', 'https://media.pollinations.ai/abc2'],
 };
 
 describe('readProviderEnv', () => {
   const originales = { ...process.env };
 
   beforeEach(() => {
-    delete process.env.ALIBABA_API_KEY;
-    delete process.env.ALIBABA_REGION;
-    delete process.env.ALIBABA_WORKSPACE_ID;
-    delete process.env.ALIBABA_API_BASE_URL;
+    delete process.env.POLLINATIONS_API_KEY;
   });
 
   afterEach(() => {
     process.env = { ...originales };
   });
 
-  it('exige ALIBABA_API_KEY y lanza 500 MISSING_CONFIGURATION sin ella', () => {
+  it('exige POLLINATIONS_API_KEY y lanza 500 MISSING_CONFIGURATION sin ella', () => {
     try {
       readProviderEnv();
       expect.unreachable('debería haber lanzado');
@@ -46,256 +52,194 @@ describe('readProviderEnv', () => {
       expect(err).toBeInstanceOf(HttpError);
       expect((err as HttpError).estado).toBe(500);
       expect((err as HttpError).codigo).toBe('MISSING_CONFIGURATION');
+      expect((err as HttpError).message).toContain('POLLINATIONS_API_KEY');
     }
   });
 
-  it('la base explícita ALIBABA_API_BASE_URL gana', () => {
-    process.env.ALIBABA_API_KEY = 'sk-x';
-    process.env.ALIBABA_API_BASE_URL = 'https://mi-proxy.example.com/dashscope/';
-    const env = readProviderEnv();
-    expect(env.baseUrl).toBe('https://mi-proxy.example.com/dashscope');
-  });
-
-  it('construye la URL desde ALIBABA_WORKSPACE_ID + ALIBABA_REGION', () => {
-    process.env.ALIBABA_API_KEY = 'sk-x';
-    process.env.ALIBABA_REGION = 'eu-central-1';
-    process.env.ALIBABA_WORKSPACE_ID = 'ws123';
-    const env = readProviderEnv();
-    expect(env.baseUrl).toBe('https://ws123.eu-central-1.maas.aliyuncs.com/api/v1');
-    expect(env.region).toBe('eu-central-1');
-  });
-
-  it('usa la URL legacy y la región por defecto si no hay nada más', () => {
-    process.env.ALIBABA_API_KEY = 'sk-x';
-    const env = readProviderEnv();
-    expect(env.baseUrl).toBe('https://dashscope-intl.aliyuncs.com/api/v1');
-    expect(env.region).toBe('ap-southeast-1');
+  it('devuelve la key cuando está configurada', () => {
+    process.env.POLLINATIONS_API_KEY = 'sk_test_123';
+    expect(readProviderEnv()).toEqual({ apiKey: 'sk_test_123' });
   });
 });
 
-describe('AlibabaVideoProvider (fetch simulado)', () => {
+describe('urlGeneracion', () => {
+  it('construye la URL determinista con todos los parámetros', () => {
+    const proveedor = new PollinationsVideoProvider(ENV);
+    const url = new URL(proveedor.urlGeneracion(entradaBase));
+    expect(url.origin + url.pathname).toBe(
+      'https://gen.pollinations.ai/video/' + encodeURIComponent(entradaBase.prompt),
+    );
+    expect(url.searchParams.get('model')).toBe('google/veo-3.1-fast');
+    expect(url.searchParams.get('duration')).toBe('8');
+    expect(url.searchParams.get('resolution')).toBe('720p');
+    expect(url.searchParams.get('aspectRatio')).toBe('16:9');
+    expect(url.searchParams.get('audio')).toBe('true');
+    expect(url.searchParams.get('seed')).toBe('42');
+    expect(url.searchParams.get('image')).toBe(
+      'https://media.pollinations.ai/abc1|https://media.pollinations.ai/abc2',
+    );
+  });
+
+  it('omite seed e image cuando no se proporcionan', () => {
+    const proveedor = new PollinationsVideoProvider(ENV);
+    const url = new URL(
+      proveedor.urlGeneracion({ ...entradaBase, semilla: undefined, imagenes: undefined }),
+    );
+    expect(url.searchParams.has('seed')).toBe(false);
+    expect(url.searchParams.has('image')).toBe(false);
+  });
+
+  it('dos entradas iguales generan la misma URL (idempotencia)', () => {
+    const proveedor = new PollinationsVideoProvider(ENV);
+    expect(proveedor.urlGeneracion(entradaBase)).toBe(proveedor.urlGeneracion({ ...entradaBase }));
+  });
+});
+
+describe('generarVideo', () => {
   afterEach(() => {
     vi.unstubAllGlobals();
   });
 
-  it('crearTareaVideo OK: devuelve task_id con las cabeceras y el mapeo oficiales', async () => {
-    const fetchMock = vi.fn(async () =>
-      respuestaJson({ output: { task_id: 'task-abc', task_status: 'PENDING' }, request_id: 'req-1' }),
-    );
+  it('devuelve los bytes del MP4 cuando el proveedor responde 200', async () => {
+    const bytes = new Uint8Array([0, 1, 2, 3, 4]);
+    const fetchMock = vi.fn().mockResolvedValue(respuestaVideo(bytes));
     vi.stubGlobal('fetch', fetchMock);
-    const proveedor = new AlibabaVideoProvider(ENV);
 
-    const tarea = await proveedor.crearTareaVideo({
-      ...entradaBase,
-      resolucion: '480p',
-      aspecto: 'auto',
-      semilla: 42,
-      mejoraPrompt: true,
-      marcaAgua: false,
-    });
+    const proveedor = new PollinationsVideoProvider(ENV);
+    const resultado = await proveedor.generarVideo(entradaBase);
 
-    expect(tarea.taskId).toBe('task-abc');
-    expect(tarea.estado).toBe('pending');
-
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
-    expect(url).toBe(
-      'https://dashscope-intl.aliyuncs.com/api/v1/services/aigc/video-generation/video-synthesis',
-    );
-    const cabeceras = init.headers as Record<string, string>;
-    expect(cabeceras['X-DashScope-Async']).toBe('enable');
-    expect(cabeceras['Authorization']).toBe('Bearer sk-test');
-    expect(cabeceras['Content-Type']).toBe('application/json');
-
-    const cuerpo = JSON.parse(init.body as string) as Record<string, any>;
-    expect(cuerpo.model).toBe('wan3.0-video');
-    expect(cuerpo.input.prompt).toBe(entradaBase.prompt);
-    expect(cuerpo.parameters).toMatchObject({
-      resolution: '480P', // 480p → 480P
-      ratio: 'adaptive', // auto → adaptive
-      duration: 5,
-      audio: true,
-      seed: 42,
-      prompt_extend: true,
-      watermark: false,
-    });
+    expect(resultado.estado).toBe('completado');
+    if (resultado.estado === 'completado') {
+      expect(Buffer.from(resultado.datos).equals(Buffer.from(bytes))).toBe(true);
+      expect(resultado.contentType).toBe('video/mp4');
+    }
+    // La key viaja en la cabecera Authorization, nunca en la URL.
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect((init.headers as Record<string, string>).Authorization).toBe('Bearer sk_test_123');
+    expect(fetchMock.mock.calls[0][0] as string).not.toContain('sk_test_123');
   });
 
-  it('crearTareaVideo NO envía seed/prompt_extend/watermark si no están definidos', async () => {
-    const fetchMock = vi.fn(async () =>
-      respuestaJson({ output: { task_id: 'task-x', task_status: 'PENDING' }, request_id: 'req-2' }),
-    );
+  it('un timeout propio devuelve estado procesando (el cliente reintentará)', async () => {
+    const fetchMock = vi.fn().mockRejectedValue(new DOMException('Timeout', 'AbortError'));
     vi.stubGlobal('fetch', fetchMock);
-    const proveedor = new AlibabaVideoProvider(ENV);
 
-    await proveedor.crearTareaVideo(entradaBase);
-
-    const [, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
-    const params = JSON.parse(init.body as string).parameters as Record<string, unknown>;
-    expect(params).not.toHaveProperty('seed');
-    expect(params).not.toHaveProperty('prompt_extend');
-    expect(params).not.toHaveProperty('watermark');
+    const proveedor = new PollinationsVideoProvider(ENV);
+    const resultado = await proveedor.generarVideo(entradaBase);
+    expect(resultado).toEqual({ estado: 'procesando' });
   });
 
-  it('obtenerTareaVideo: transición PENDING → RUNNING → SUCCEEDED con video_url y usage', async () => {
-    const respuestas = [
-      respuestaJson({ output: { task_status: 'PENDING' }, request_id: 'r1' }),
-      respuestaJson({ output: { task_status: 'RUNNING' }, request_id: 'r2' }),
-      respuestaJson({
-        output: {
-          task_status: 'SUCCEEDED',
-          video_url: 'https://video.aliyuncs.com/x.mp4',
-          usage: { video_count: 1, duration: 5, fps: 24, ratio: '16:9' },
-        },
-        request_id: 'r3',
-      }),
-    ];
-    const fetchMock = vi.fn(async () => respuestas.shift() as Response);
-    vi.stubGlobal('fetch', fetchMock);
-    const proveedor = new AlibabaVideoProvider(ENV);
-
-    const t1 = await proveedor.obtenerTareaVideo('task-abc');
-    expect(t1.estado).toBe('pending');
-
-    const t2 = await proveedor.obtenerTareaVideo('task-abc');
-    expect(t2.estado).toBe('processing');
-
-    const t3 = await proveedor.obtenerTareaVideo('task-abc');
-    expect(t3.estado).toBe('succeeded');
-    expect(t3.videoUrl).toBe('https://video.aliyuncs.com/x.mp4');
-    expect(t3.uso).toEqual({ duracion: 5, fps: 24, ratio: '16:9' });
-    expect(t3.expiraEn).toBeDefined();
-
-    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
-    expect(url).toBe('https://dashscope-intl.aliyuncs.com/api/v1/tasks/task-abc');
-    expect((init.headers as Record<string, string>)['Authorization']).toBe('Bearer sk-test');
+  it('un fallo de red lanza 502 PROVIDER_ERROR', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('network down')));
+    const proveedor = new PollinationsVideoProvider(ENV);
+    try {
+      await proveedor.generarVideo(entradaBase);
+      expect.unreachable('debería haber lanzado');
+    } catch (err) {
+      expect(err).toBeInstanceOf(HttpError);
+      expect((err as HttpError).estado).toBe(502);
+    }
   });
 
-  it('obtenerTareaVideo: reintenta una vez ante un 500 y tiene éxito', async () => {
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce(new Response('error', { status: 500 }))
-      .mockResolvedValueOnce(respuestaJson({ output: { task_status: 'RUNNING' } }));
-    vi.stubGlobal('fetch', fetchMock);
-    const proveedor = new AlibabaVideoProvider(ENV);
-
-    const tarea = await proveedor.obtenerTareaVideo('task-abc');
-    expect(tarea.estado).toBe('processing');
-    expect(fetchMock).toHaveBeenCalledTimes(2);
-  }, 10_000);
-
-  it('401 InvalidApiKey mapea al mensaje de región', async () => {
+  it('402 del proveedor → PAYMENT_REQUIRED con mención al Pollen', async () => {
     vi.stubGlobal(
       'fetch',
-      vi.fn(async () =>
-        respuestaJson(
-          { code: 'InvalidApiKey', message: 'Invalid API-key provided.', request_id: 'r' },
-          401,
-        ),
+      vi.fn().mockResolvedValue(respuestaErrorJson(402, 'INSUFFICIENT_POLLEN', 'Not enough pollen')),
+    );
+    const proveedor = new PollinationsVideoProvider(ENV);
+    try {
+      await proveedor.generarVideo(entradaBase);
+      expect.unreachable('debería haber lanzado');
+    } catch (err) {
+      expect(err).toBeInstanceOf(HttpError);
+      expect((err as HttpError).estado).toBe(402);
+      expect((err as HttpError).codigo).toBe('PAYMENT_REQUIRED');
+      expect((err as HttpError).message).toContain('Pollen');
+    }
+  });
+
+  it('401 del proveedor → UNAUTHORIZED', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(respuestaErrorJson(401, 'INVALID_KEY', 'Bad key')),
+    );
+    const proveedor = new PollinationsVideoProvider(ENV);
+    try {
+      await proveedor.generarVideo(entradaBase);
+      expect.unreachable('debería haber lanzado');
+    } catch (err) {
+      expect((err as HttpError).estado).toBe(401);
+      expect((err as HttpError).codigo).toBe('UNAUTHORIZED');
+    }
+  });
+});
+
+describe('subirMedio', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('devuelve la URL pública del almacenamiento', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          id: 'xyz123',
+          url: 'https://media.pollinations.ai/xyz123',
+          contentType: 'video/mp4',
+          size: 1234,
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
       ),
     );
-    const proveedor = new AlibabaVideoProvider(ENV);
+    vi.stubGlobal('fetch', fetchMock);
 
-    await expect(proveedor.crearTareaVideo(entradaBase)).rejects.toMatchObject({
-      estado: 401,
-      message:
-        'La API key no es válida o no corresponde a la región configurada. Revisa ALIBABA_API_KEY y ALIBABA_REGION. Código del proveedor: InvalidApiKey.',
-    });
+    const proveedor = new PollinationsVideoProvider(ENV);
+    const url = await proveedor.subirMedio(Buffer.from([1, 2, 3]), 'video/mp4', 'video-1.mp4');
+    expect(url).toBe('https://media.pollinations.ai/xyz123');
+    const [destino, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(destino).toBe('https://media.pollinations.ai/upload');
+    expect((init.headers as Record<string, string>)['Content-Type']).toBe('video/mp4');
   });
 
-  it('429 mapea a RATE_LIMITED con mensaje que invita a reintentar', async () => {
+  it('sin URL en la respuesta lanza 502', async () => {
     vi.stubGlobal(
       'fetch',
-      vi.fn(async () =>
-        respuestaJson({ code: 'Throttling', message: 'Request was denied due to request throttling.', request_id: 'r' }, 429),
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ id: 'x' }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
       ),
     );
-    const proveedor = new AlibabaVideoProvider(ENV);
+    const proveedor = new PollinationsVideoProvider(ENV);
+    try {
+      await proveedor.subirMedio(Buffer.from([1]), 'video/mp4', 'v.mp4');
+      expect.unreachable('debería haber lanzado');
+    } catch (err) {
+      expect((err as HttpError).estado).toBe(502);
+    }
+  });
+});
 
-    await expect(proveedor.obtenerTareaVideo('task-abc')).rejects.toMatchObject({
-      estado: 429,
-      codigo: 'RATE_LIMITED',
-      message: 'Límite de peticiones alcanzado. Espera unos segundos e inténtalo de nuevo.',
-    });
+describe('decodificarDataUrl', () => {
+  it('decodifica un data URI JPEG válido', () => {
+    const original = Buffer.from([10, 20, 30, 40]);
+    const dataUrl = `data:image/jpeg;base64,${original.toString('base64')}`;
+    const { datos, contentType } = decodificarDataUrl(dataUrl);
+    expect(contentType).toBe('image/jpeg');
+    expect(Buffer.from(datos).equals(original)).toBe(true);
   });
 
-  it('el timeout aborta la petición y devuelve 502 sin exponer la key', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async () => {
-        throw new DOMException('The operation was aborted.', 'AbortError');
-      }),
-    );
-    const proveedor = new AlibabaVideoProvider(ENV);
-
-    await expect(proveedor.crearTareaVideo(entradaBase)).rejects.toMatchObject({
-      estado: 502,
-      message: 'No se pudo contactar con Alibaba Cloud Model Studio.',
-    });
+  it('normaliza image/jpg a image/jpeg', () => {
+    const { contentType } = decodificarDataUrl('data:image/jpg;base64,aGk=');
+    expect(contentType).toBe('image/jpeg');
   });
 
-  it('UNKNOWN del proveedor (tarea caducada) se normaliza a "unknown"', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async () => respuestaJson({ output: { task_status: 'UNKNOWN' }, request_id: 'r' })),
-    );
-    const proveedor = new AlibabaVideoProvider(ENV);
-
-    const tarea = await proveedor.obtenerTareaVideo('task-vieja');
-    expect(tarea.estado).toBe('unknown');
-  });
-
-  it('crearTareaVideo incluye input.media con las imágenes de referencia', async () => {
-    const fetchMock = vi.fn(async () =>
-      respuestaJson({ output: { task_id: 'task-media', task_status: 'PENDING' }, request_id: 'req-m' }),
-    );
-    vi.stubGlobal('fetch', fetchMock);
-    const proveedor = new AlibabaVideoProvider(ENV);
-
-    const media = [
-      { type: 'reference_image' as const, url: 'data:image/jpeg;base64,QUJD' },
-      { type: 'reference_image' as const, url: 'data:image/png;base64,REVG' },
-    ];
-    await proveedor.crearTareaVideo({ ...entradaBase, media });
-
-    const [, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
-    const cuerpo = JSON.parse(init.body as string) as Record<string, any>;
-    expect(cuerpo.input.prompt).toBe(entradaBase.prompt);
-    expect(cuerpo.input.media).toEqual(media);
-  });
-
-  it('crearTareaVideo no envía input.media cuando no hay imágenes (comportamiento intacto)', async () => {
-    const fetchMock = vi.fn(async () =>
-      respuestaJson({ output: { task_id: 'task-sin', task_status: 'PENDING' }, request_id: 'req-s' }),
-    );
-    vi.stubGlobal('fetch', fetchMock);
-    const proveedor = new AlibabaVideoProvider(ENV);
-
-    await proveedor.crearTareaVideo(entradaBase);
-
-    const [, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
-    const cuerpo = JSON.parse(init.body as string) as Record<string, any>;
-    expect(cuerpo.input).toEqual({ prompt: entradaBase.prompt });
-    expect(cuerpo.input).not.toHaveProperty('media');
-  });
-
-  it('crearTareaVideo no vuelca el base64 en los logs', async () => {
-    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => undefined);
-    const fetchMock = vi.fn(async () =>
-      respuestaJson({ output: { task_id: 'task-log', task_status: 'PENDING' }, request_id: 'req-l' }),
-    );
-    vi.stubGlobal('fetch', fetchMock);
-    const proveedor = new AlibabaVideoProvider(ENV);
-
-    const secreto = 'data:image/jpeg;base64,' + 'U0VDUkVUTw=='.repeat(50);
-    await proveedor.crearTareaVideo({
-      ...entradaBase,
-      media: [{ type: 'reference_image' as const, url: secreto }],
-    });
-
-    const todoLoRegistrado = logSpy.mock.calls.map((c) => String(c[0])).join(' ');
-    expect(todoLoRegistrado).not.toContain(secreto.slice(30));
-    expect(todoLoRegistrado).toContain('"imagenes":1');
-    logSpy.mockRestore();
+  it('rechaza un data URI inválido con 400', () => {
+    try {
+      decodificarDataUrl('https://example.com/foto.jpg');
+      expect.unreachable('debería haber lanzado');
+    } catch (err) {
+      expect((err as HttpError).estado).toBe(400);
+    }
   });
 });

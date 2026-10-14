@@ -1,7 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { requireMethod, sendError, sendOk } from '../../server/lib/errors.js';
 import { MODELOS } from '../../server/lib/capabilities.js';
-import { MAX_SIMULTANEAS } from '../../server/lib/tareas.js';
 
 /**
  * GET /api/video/config
@@ -14,16 +13,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
 
     sendOk(res, {
       limites: {
-        promptMax: 20000,
-        duracionMin: 2,
-        duracionMax: 30,
+        /** El prompt viaja en la ruta de una petición GET al proveedor. */
+        promptMax: 2000,
         resoluciones: ['480p', '720p', '1080p'],
-        generacionesSimultaneas: MAX_SIMULTANEAS,
+        relacionesAspecto: ['16:9', '9:16'],
+        modelos: MODELOS.map((m) => ({
+          id: m.id,
+          duraciones: m.duraciones,
+          resoluciones: m.resoluciones,
+          maxImagenes: m.maxImagenes,
+        })),
       },
       integracion: {
         estado: 'disponible',
         // Decisión expresa del usuario: este proyecto NO tiene modo demo.
         modoDemo: false,
+        proveedor: 'Pollinations',
         modelos: MODELOS.map((m) => m.id),
       },
     });

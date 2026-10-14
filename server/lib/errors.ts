@@ -14,6 +14,7 @@ export type CodigoErrorApi =
   | 'NOT_FOUND'
   | 'METHOD_NOT_ALLOWED'
   | 'PAYLOAD_TOO_LARGE'
+  | 'PAYMENT_REQUIRED'
   | 'RATE_LIMITED'
   | 'MISSING_CONFIGURATION'
   | 'PROVIDER_NOT_IMPLEMENTED'
@@ -107,15 +108,16 @@ export function readJsonBody(req: VercelRequest, maxBytes: number, mensajeExceso
 }
 
 /**
- * Mapea un error del proveedor (Alibaba Cloud Model Studio) a un HttpError
- * con mensaje en español listo para mostrar al usuario.
+ * Mapea un error del proveedor (Pollinations, formato
+ * {status, error:{code, message}}) a un HttpError con mensaje en español
+ * listo para mostrar al usuario.
  *
- * Reglas verificadas contra la documentación oficial (2026-10-09):
- * - 401 InvalidApiKey → la key no es válida o no es de la región configurada.
- * - 403 → permisos del modelo; Unpurchased/FreeTierOnly → sin habilitar o cuota agotada.
- * - 404 → modelo no encontrado en la región.
- * - 429 → el cliente puede reintentar tras una pausa (sin reintento automático en el servidor).
- * - 400 InvalidParameter → se adjunta el mensaje del proveedor.
+ * Reglas verificadas contra la documentación oficial (2026-10-14):
+ * - 401 → la key no es válida.
+ * - 402 → saldo de Pollen insuficiente (el vídeo requiere Pollen de pago).
+ * - 403 → la key no tiene permiso para el modelo.
+ * - 429 → el cliente puede reintentar tras una pausa.
+ * - 400 → se adjunta el mensaje del proveedor.
  * - 5xx del proveedor → 502 propio con mensaje genérico.
  */
 export function mapProviderError(
@@ -125,45 +127,38 @@ export function mapProviderError(
 ): HttpError {
   const codigo = (code ?? '').trim();
   const mensajeProveedor = (message ?? '').trim();
-  // Los códigos del proveedor vienen con puntos (p. ej. "AllocationQuota.FreeTierOnly"):
-  // se comparan por contenido, no por igualdad exacta. Se adjunta el código
-  // real al mensaje para facilitar el diagnóstico (no es información sensible).
+  // Se adjunta el código real al mensaje para facilitar el diagnóstico
+  // (no es información sensible).
   const sufijoCodigo = codigo ? ` Código del proveedor: ${codigo}.` : '';
 
   if (statusHttp === 401) {
-    if (codigo.includes('InvalidApiKey')) {
-      return new HttpError(
-        401,
-        'UNAUTHORIZED',
-        'La API key no es válida o no corresponde a la región configurada. Revisa ALIBABA_API_KEY y ALIBABA_REGION.' +
-          sufijoCodigo,
-      );
-    }
     return new HttpError(
       401,
       'UNAUTHORIZED',
-      'No autorizado: comprueba la configuración del servidor (región/workspace).' + sufijoCodigo,
-    );
-  }
-
-  if (statusHttp === 403) {
-    if (codigo.includes('Unpurchased') || codigo.includes('FreeTierOnly')) {
-      return new HttpError(
-        403,
-        'FORBIDDEN',
-        'El servicio no está habilitado o la cuota gratuita se ha agotado.' + sufijoCodigo,
-      );
-    }
-    return new HttpError(
-      403,
-      'FORBIDDEN',
-      'El proveedor rechazó la petición (403). Revisa los permisos del modelo en Model Studio.' +
+      'La API key de Pollinations no es válida. Revisa POLLINATIONS_API_KEY en el servidor.' +
         sufijoCodigo,
     );
   }
 
+  if (statusHttp === 402) {
+    return new HttpError(
+      402,
+      'PAYMENT_REQUIRED',
+      'Tu cuenta de Pollinations no tiene saldo suficiente de Pollen de pago para esta generación. Recarga saldo en enter.pollinations.ai.' +
+        sufijoCodigo,
+    );
+  }
+
+  if (statusHttp === 403) {
+    return new HttpError(
+      403,
+      'FORBIDDEN',
+      'La API key no tiene permiso para generar vídeo con este modelo.' + sufijoCodigo,
+    );
+  }
+
   if (statusHttp === 404) {
-    return new HttpError(404, 'NOT_FOUND', 'Modelo no encontrado en la región configurada.');
+    return new HttpError(404, 'NOT_FOUND', 'Modelo no encontrado en el catálogo del proveedor.');
   }
 
   if (statusHttp === 429) {
@@ -174,11 +169,12 @@ export function mapProviderError(
     );
   }
 
-  if (statusHttp === 400 && codigo === 'InvalidParameter') {
+  if (statusHttp === 400) {
     return new HttpError(
       400,
       'BAD_REQUEST',
-      `Parámetros no válidos: ${mensajeProveedor || 'revisa los parámetros enviados.'}`,
+      `Parámetros no válidos: ${mensajeProveedor || 'revisa los parámetros enviados.'}` +
+        sufijoCodigo,
     );
   }
 

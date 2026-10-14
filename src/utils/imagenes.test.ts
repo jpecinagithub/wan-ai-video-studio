@@ -83,7 +83,7 @@ describe('bytesAproximadosDataUrl', () => {
 
 describe('constantes', () => {
   it('el máximo de imágenes de referencia es 10 (límite oficial)', () => {
-    expect(MAX_IMAGENES_REFERENCIA).toBe(10);
+    expect(MAX_IMAGENES_REFERENCIA).toBe(2);
   });
 });
 

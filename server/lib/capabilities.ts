@@ -1,9 +1,12 @@
+import { HttpError } from './errors.js';
 import type { ModelIdApi } from './validation.js';
 
 /**
  * Registro centralizado del backend: modelos soportados y sus capacidades.
- * Precios oficiales de Alibaba Cloud Model Studio (USD por segundo de vídeo,
- * región Singapur, verificados 2026-10-09). Las peticiones fallidas no se facturan.
+ * Precios en pollen por segundo de vídeo generado, verificados contra el
+ * catálogo en vivo de Pollinations (GET /video/models, 2026-10-14).
+ * $1 ≈ 1 pollen (FAQ oficial de Pollinations). Las peticiones fallidas
+ * no se facturan. Todos los modelos de vídeo requieren Pollen de pago.
  */
 
 export type VelocidadModelo = 'rápida' | 'muy rápida';
@@ -17,71 +20,127 @@ export interface CapacidadModelo {
   caracteristicas: string[];
   velocidad: VelocidadModelo;
   resoluciones: ResolucionApi[];
-  duracionMin: number;
-  duracionMax: number;
-  /** USD por segundo de vídeo generado, por resolución. */
-  precioPorSegundo: Record<ResolucionApi, number>;
-  estadoIntegracion: EstadoIntegracion;
+  resolucionDefecto: ResolucionApi;
+  /** Duraciones permitidas en segundos (lista cerrada por modelo). */
+  duraciones: number[];
+  duracionDefecto: number;
   /**
-   * Cuota gratuita del panel de Model Studio del usuario (dato de su cuenta,
-   * 2026-10-09). No es sensible: se expone en GET /api/video/models.
+   * Imágenes admitidas: 1 = solo fotograma inicial; 2 = inicial + final.
+   * Se envían como image[0] (inicial) e image[1] (final).
    */
-  cuotaGratis: { total: number; expira: string };
+  maxImagenes: number;
+  /** El modelo puede generar pista de audio (Veo la factura aparte). */
+  generaAudio: boolean;
+  /** Pollen por segundo de vídeo, por resolución. */
+  precioVideoPorSegundo: Record<ResolucionApi, number>;
+  /** Pollen por segundo de audio (0 si no aplica). */
+  precioAudioPorSegundo: number;
+  estadoIntegracion: EstadoIntegracion;
 }
 
 export const MODELOS: CapacidadModelo[] = [
   {
-    id: 'wan3.0-video',
-    nombre: 'WAN 3.0 Video',
+    id: 'bytedance/seedance-1-pro-fast',
+    nombre: 'Seedance Pro Fast',
     descripcion:
-      'Modelo de generación de vídeo equilibrado: buena calidad con tiempos de proceso ágiles para iterar rápido.',
+      'Modelo rápido y económico de ByteDance: ideal para iterar ideas y probar conceptos sin gastar casi nada.',
     caracteristicas: [
-      'Texto a vídeo de alta calidad',
-      'Movimiento de cámara natural',
-      'Ideal para iterar ideas rápidamente',
+      'Texto a vídeo e imagen a vídeo',
+      'Hasta 10 segundos por clip',
+      'El más barato del catálogo',
     ],
     velocidad: 'rápida',
     resoluciones: ['480p', '720p', '1080p'],
-    duracionMin: 2,
-    duracionMax: 30,
-    precioPorSegundo: { '480p': 0.05, '720p': 0.1, '1080p': 0.2 },
+    resolucionDefecto: '720p',
+    duraciones: [2, 3, 4, 5, 6, 7, 8, 9, 10],
+    duracionDefecto: 8,
+    maxImagenes: 1,
+    generaAudio: false,
+    precioVideoPorSegundo: { '480p': 0.015, '720p': 0.025, '1080p': 0.06 },
+    precioAudioPorSegundo: 0,
     estadoIntegracion: 'disponible',
-    cuotaGratis: { total: 30, expira: '2026-11-04' },
   },
   {
-    id: 'wan3.0-video-prime',
-    nombre: 'WAN 3.0 Video Prime',
+    id: 'google/veo-3.1-fast',
+    nombre: 'Veo 3.1 Fast',
     descripcion:
-      'Versión de alta velocidad de WAN 3.0: proceso de extremo a extremo notablemente más rápido, con las mismas capacidades y parámetros.',
+      'El modelo de vídeo de Google: máxima calidad cinematográfica con audio generado, fotograma inicial y final.',
     caracteristicas: [
-      'Velocidad de generación muy superior',
-      'Mismas resoluciones y parámetros',
-      'Ideal cuando el tiempo apremia',
+      'Calidad cinematográfica con audio',
+      'Fotograma inicial y final',
+      'Movimiento de cámara natural',
     ],
     velocidad: 'muy rápida',
-    resoluciones: ['480p', '720p', '1080p'],
-    duracionMin: 2,
-    duracionMax: 30,
-    precioPorSegundo: { '480p': 0.068, '720p': 0.14, '1080p': 0.28 },
+    resoluciones: ['720p', '1080p'],
+    resolucionDefecto: '720p',
+    duraciones: [4, 6, 8],
+    duracionDefecto: 8,
+    maxImagenes: 2,
+    generaAudio: true,
+    precioVideoPorSegundo: { '480p': 0.08, '720p': 0.08, '1080p': 0.1 },
+    precioAudioPorSegundo: 0.02,
     estadoIntegracion: 'disponible',
-    cuotaGratis: { total: 30, expira: '2026-11-20' },
   },
 ];
 
-export const MONEDA_PRECIOS = 'USD';
+export const MONEDA_PRECIOS = 'pollen';
 
 /** Devuelve la capacidad de un modelo por su id (o undefined si no existe). */
 export function obtenerCapacidad(modelId: string): CapacidadModelo | undefined {
   return MODELOS.find((m) => m.id === modelId);
 }
 
-/** Estimación del coste de una generación (USD). Solo para información; fallos no se facturan. */
-export function estimarCoste(
+/**
+ * Valida que la combinación de parámetros sea compatible con el modelo.
+ * Lanza HttpError 400 con un mensaje en español si no lo es.
+ */
+export function validarCombinacion(
+  modelId: ModelIdApi,
+  duracion: number,
+  resolucion: ResolucionApi,
+  numImagenes: number,
+): void {
+  const modelo = obtenerCapacidad(modelId);
+  if (!modelo) {
+    throw new HttpError(400, 'BAD_REQUEST', 'Modelo no válido.');
+  }
+  if (!modelo.duraciones.includes(duracion)) {
+    throw new HttpError(
+      400,
+      'BAD_REQUEST',
+      `${modelo.nombre} solo admite duraciones de ${modelo.duraciones.join(', ')} segundos.`,
+    );
+  }
+  if (!modelo.resoluciones.includes(resolucion)) {
+    throw new HttpError(
+      400,
+      'BAD_REQUEST',
+      `${modelo.nombre} solo admite resolución ${modelo.resoluciones.join(', ')}.`,
+    );
+  }
+  if (numImagenes > modelo.maxImagenes) {
+    throw new HttpError(
+      400,
+      'BAD_REQUEST',
+      `${modelo.nombre} admite como máximo ${modelo.maxImagenes} ${modelo.maxImagenes === 1 ? 'imagen (fotograma inicial)' : 'imágenes (fotogramas inicial y final)'}.`,
+    );
+  }
+}
+
+/**
+ * Estimación del coste de una generación, en pollen.
+ * Solo para información; las peticiones fallidas no se facturan.
+ */
+export function estimarCostePollen(
   modelId: ModelIdApi,
   resolucion: ResolucionApi,
   duracionSegundos: number,
+  audio: boolean,
 ): number {
   const modelo = obtenerCapacidad(modelId);
   if (!modelo) return 0;
-  return modelo.precioPorSegundo[resolucion] * duracionSegundos;
+  const video = modelo.precioVideoPorSegundo[resolucion] * duracionSegundos;
+  const audioCoste =
+    audio && modelo.generaAudio ? modelo.precioAudioPorSegundo * duracionSegundos : 0;
+  return video + audioCoste;
 }

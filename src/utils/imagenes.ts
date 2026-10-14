@@ -24,8 +24,8 @@ export const MAX_ORIGINAL_BYTES = 20 * 1024 * 1024;
 export const MAX_LADO_PX = 1280;
 /** Objetivo de tamaño por imagen comprimida (margen bajo el límite del body). */
 export const OBJETIVO_BYTES = 300 * 1024;
-/** Máximo de imágenes de referencia (límite oficial). */
-export const MAX_IMAGENES_REFERENCIA = 10;
+/** Máximo de imágenes de referencia (el mayor de los modelos: Veo admite 2). */
+export const MAX_IMAGENES_REFERENCIA = 2;
 
 const MIME_SOPORTADOS = ['image/jpeg', 'image/png', 'image/webp', 'image/bmp'];
 const EXTENSION_A_MIME: Record<string, string> = {

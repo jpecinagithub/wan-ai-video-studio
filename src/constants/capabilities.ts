@@ -1,17 +1,18 @@
 import type { AspectRatio, ModelId, Resolution } from '../types';
-import { MODELOS } from './models';
+import { MODELOS, obtenerModelo } from './models';
 
 /**
  * Registro centralizado de capacidades.
  * Toda la interfaz construye sus controles a partir de aquí, de modo que
  * una combinación incompatible se deshabilita con su motivo explicado.
  *
- * Límites verificados contra la documentación oficial de Alibaba Cloud
- * Model Studio (2026-10-09). Ambos modelos comparten API y límites:
- * duración entera [2,30] (defecto 5), resolución 480P/720P/1080P
- * (defecto 1080P), ratio adaptive|21:9|16:9|4:3|1:1|3:4|9:16
- * (defecto adaptive), audio booleano (defecto true, no afecta al precio),
- * seed -1|[0,2147483647], prompt_extend (defecto true), watermark (defecto false).
+ * Límites verificados contra el catálogo en vivo de Pollinations
+ * (GET /video/models y OpenAPI de /video/{prompt}, 2026-10-14):
+ * - Seedance Pro Fast: duración entera 2-10 s, 480p/720p/1080p,
+ *   1 imagen (fotograma inicial), sin pista de audio.
+ * - Veo 3.1 Fast: duración 4/6/8 s, 720p/1080p, 2 imágenes
+ *   (fotogramas inicial y final), audio opcional (+0,02 pollen/s).
+ * - Relaciones de aspecto soportadas por estos modelos: 16:9 y 9:16.
  */
 
 export interface OpcionResolucion {
@@ -30,15 +31,9 @@ export interface OpcionAspecto {
 }
 
 export const CAPACIDADES = {
-  duracion: {
-    min: 2,
-    max: 30,
-    defecto: 5,
-    paso: 1,
-    unidad: 's',
-  },
   prompt: {
-    maxCaracteres: 20000,
+    /** El prompt viaja en la ruta de una petición GET al proveedor. */
+    maxCaracteres: 2000,
   },
   resoluciones: [
     {
@@ -62,33 +57,19 @@ export const CAPACIDADES = {
   ] as OpcionResolucion[],
   aspectos: [
     { id: '16:9', nombre: 'Horizontal', descripcion: 'Pantallas y YouTube', ratioCss: '16 / 9' },
-    { id: '21:9', nombre: 'Panorámico', descripcion: 'Formato cine', ratioCss: '21 / 9' },
     { id: '9:16', nombre: 'Vertical', descripcion: 'Móvil, Reels y TikTok', ratioCss: '9 / 16' },
-    { id: '1:1', nombre: 'Cuadrado', descripcion: 'Publicaciones sociales', ratioCss: '1 / 1' },
-    { id: '4:3', nombre: 'Clásico', descripcion: 'Formato tradicional', ratioCss: '4 / 3' },
-    { id: '3:4', nombre: 'Retrato', descripcion: 'Retrato vertical', ratioCss: '3 / 4' },
-    { id: 'auto', nombre: 'Automático', descripcion: 'Lo decide el modelo', ratioCss: '16 / 9' },
   ] as OpcionAspecto[],
   audio: {
-    soportado: true,
-    descripcion: 'Generar el vídeo con pista de audio. No afecta al precio.',
+    descripcion:
+      'Generar el vídeo con pista de audio. Solo Veo 3.1 genera audio (suma 0,02 pollen/s); en Seedance no tiene efecto.',
   },
   avanzadas: {
     semilla: {
       soportado: true,
-      descripcion: 'Fija la semilla para repetir resultados similares. Vacío = aleatoria.',
-    },
-    mejoraPrompt: {
-      soportado: true,
-      descripcion: 'El modelo amplía automáticamente tu descripción (activado por defecto).',
-    },
-    marcaAgua: {
-      soportado: true,
-      descripcion: 'Añade una marca de agua al vídeo generado.',
+      descripcion:
+        'Fija la semilla para repetir resultados. Vacío = aleatoria (se genera una por intento y se reutiliza en los reintentos).',
     },
   },
-  /** Límite local de generaciones simultáneas (también se aplica en el servidor). */
-  generacionesSimultaneas: 2,
 } as const;
 
 export interface ParametrosGeneracion {
@@ -104,52 +85,66 @@ export function esCombinacionValida(p: ParametrosGeneracion): boolean {
   return motivoIncompatibilidad(p) === null;
 }
 
-/**
- * Devuelve el motivo por el que una combinación no es válida,
- * o null si es válida. La interfaz muestra este texto al usuario.
- *
- * La documentación oficial no establece límites de duración por resolución:
- * el rango [2,30] vale para 480p, 720p y 1080p en ambos modelos.
- */
+/** Devuelve el motivo por el que una combinación no es válida, o null si es válida. */
 export function motivoIncompatibilidad(p: ParametrosGeneracion): string | null {
-  if (p.duration < CAPACIDADES.duracion.min || p.duration > CAPACIDADES.duracion.max) {
-    return `La duración debe estar entre ${CAPACIDADES.duracion.min} y ${CAPACIDADES.duracion.max} segundos.`;
+  const modelo = obtenerModelo(p.modelId);
+  if (!modelo) return 'Modelo no válido.';
+  if (!modelo.duraciones.includes(p.duration)) {
+    return `${modelo.nombre} solo admite duraciones de ${modelo.duraciones.join(', ')} segundos.`;
+  }
+  if (!modelo.resoluciones.includes(p.resolution)) {
+    return `${modelo.nombre} solo admite resolución ${modelo.resoluciones.join(', ')}.`;
   }
   return null;
 }
 
 export interface EstimacionCoste {
   disponible: true;
-  /** Coste estimado en USD. */
-  usd: number;
+  /** Coste estimado en pollen. */
+  pollen: number;
   /** Texto listo para mostrar, etiquetado como estimación. */
   texto: string;
 }
 
 /**
- * Estimación de coste: duración × tarifa oficial por segundo (modelo, resolución).
- * Tarifas oficiales (USD/s, Singapur, scope internacional):
- * - wan3.0-video: 480p $0.05 · 720p $0.10 · 1080p $0.20
- * - wan3.0-video-prime: 480p $0.068 · 720p $0.14 · 1080p $0.28
- * Se usa la tarifa de lista (conservadora); existe un 30% de descuento
- * promocional sin fecha de fin publicada. El audio no afecta al precio
- * y las peticiones fallidas no se facturan.
+ * Estimación de coste en pollen: duración × tarifa por segundo
+ * (vídeo + audio si aplica). $1 ≈ 1 pollen (FAQ oficial de Pollinations).
+ * Las peticiones fallidas no se facturan.
  */
 export function estimarCoste(p: ParametrosGeneracion): EstimacionCoste {
-  const modelo = MODELOS.find((m) => m.id === p.modelId);
+  const modelo = obtenerModelo(p.modelId);
   if (!modelo) {
     throw new Error(`Modelo desconocido: ${p.modelId}`);
   }
-  const usd = p.duration * modelo.precioPorSegundo[p.resolution];
+  const video = p.duration * modelo.precioVideoPorSegundo[p.resolution];
+  const audio = p.audio && modelo.generaAudio ? p.duration * modelo.precioAudioPorSegundo : 0;
+  const pollen = video + audio;
   return {
     disponible: true,
-    usd,
-    texto: `≈ $${usd.toFixed(2)} USD (estimación, tarifa oficial de Singapur)`,
+    pollen,
+    texto: `≈ ${pollen.toFixed(2)} pollen (≈ $${pollen.toFixed(2)} USD)`,
   };
 }
 
-/** Indica si la URL del proveedor sigue vigente (caducan a las 24h). */
+/** Duraciones permitidas de un modelo (para construir el control de duración). */
+export function duracionesDe(modelId: ModelId): number[] {
+  return obtenerModelo(modelId)?.duraciones ?? [];
+}
+
+/** Resoluciones permitidas de un modelo. */
+export function resolucionesDe(modelId: ModelId): Resolution[] {
+  return obtenerModelo(modelId)?.resoluciones ?? [];
+}
+
+/** Máximo de imágenes de referencia de un modelo (1 o 2). */
+export function maxImagenesDe(modelId: ModelId): number {
+  return obtenerModelo(modelId)?.maxImagenes ?? 1;
+}
+
+/** Indica si la URL del almacenamiento del proveedor sigue vigente (30 días). */
 export function urlVigente(expiraEn?: string): boolean {
   if (!expiraEn) return false;
   return new Date(expiraEn).getTime() > Date.now();
 }
+
+export { MODELOS };

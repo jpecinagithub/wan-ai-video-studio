@@ -1,7 +1,6 @@
 import { useRef, useState } from 'react';
-import { ImagePlus, TextCursorInput, X } from 'lucide-react';
-import { Button, Card, ErrorBanner } from './ui';
-import { MAX_IMAGENES_REFERENCIA } from '../utils/imagenes';
+import { ImagePlus, X } from 'lucide-react';
+import { Card, ErrorBanner } from './ui';
 import { cn } from '../utils/format';
 
 export interface ImagenReferenciaItem {
@@ -14,31 +13,42 @@ interface Props {
   imagenes: ImagenReferenciaItem[];
   onAñadir: (archivos: File[]) => void;
   onEliminar: (id: string) => void;
-  onInsertarEnPrompt: (etiqueta: string) => void;
+  /** Máximo permitido por el modelo activo (1 = solo inicial, 2 = inicial + final). */
+  maxImagenes: number;
   /** true mientras se comprimen imágenes. */
   procesando: boolean;
+  /** true mientras se suben al almacenamiento del proveedor. */
+  subiendo?: boolean;
   error: string | null;
   deshabilitado?: boolean;
 }
 
+function etiquetaRol(indice: number, maxImagenes: number): string {
+  if (indice === 0) return 'Fotograma inicial';
+  return maxImagenes > 1 ? 'Fotograma final' : `Imagen ${indice + 1}`;
+}
+
 /**
  * Tarjeta de imágenes de referencia (opcional).
- * Hasta 10 fotos que el modelo usa como guía visual; en el prompt se
- * mencionan como "Image 1", "Image 2", ... (documentación oficial).
+ * La primera imagen es el fotograma inicial del vídeo; la segunda
+ * (solo en Veo 3.1) es el fotograma final. Se suben al almacenamiento
+ * del proveedor antes de generar.
  */
 export function ImagenesReferencia({
   imagenes,
   onAñadir,
   onEliminar,
-  onInsertarEnPrompt,
+  maxImagenes,
   procesando,
+  subiendo = false,
   error,
   deshabilitado = false,
 }: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [arrastrando, setArrastrando] = useState(false);
-  const lleno = imagenes.length >= MAX_IMAGENES_REFERENCIA;
-  const inactivo = deshabilitado || procesando || lleno;
+  const lleno = imagenes.length >= maxImagenes;
+  const ocupado = procesando || subiendo;
+  const inactivo = deshabilitado || ocupado || lleno;
 
   const manejarArchivos = (lista: FileList | null) => {
     if (!lista || inactivo) return;
@@ -51,13 +61,19 @@ export function ImagenesReferencia({
       <div className="mb-1 flex items-center justify-between">
         <h2 className="text-base font-semibold">Imágenes de referencia</h2>
         <span className="text-xs text-muted">
-          {imagenes.length} / {MAX_IMAGENES_REFERENCIA} · opcional
+          {imagenes.length} / {maxImagenes} · opcional
         </span>
       </div>
       <p className="text-xs text-muted">
-        Sube fotos de las personas que quieres que aparezcan y menciónalas en tu descripción como{' '}
-        <span className="font-medium text-ink">«Image 1»</span>,{' '}
-        <span className="font-medium text-ink">«Image 2»</span>, etc.
+        La primera imagen será el <span className="font-medium text-ink">fotograma inicial</span>{' '}
+        del vídeo
+        {maxImagenes > 1 && (
+          <>
+            {' '}
+            y la segunda el <span className="font-medium text-ink">fotograma final</span> (opcional)
+          </>
+        )}
+        .
       </p>
 
       {/* Zona de subida */}
@@ -87,10 +103,12 @@ export function ImagenesReferencia({
       >
         <ImagePlus className="h-7 w-7 text-accent" aria-hidden="true" />
         <span className="text-sm font-medium">
-          {procesando
-            ? 'Procesando imágenes…'
+          {ocupado
+            ? subiendo
+              ? 'Subiendo imágenes…'
+              : 'Procesando imágenes…'
             : lleno
-              ? `Máximo de ${MAX_IMAGENES_REFERENCIA} imágenes alcanzado`
+              ? `Máximo de ${maxImagenes} ${maxImagenes === 1 ? 'imagen alcanzado' : 'imágenes alcanzado'}`
               : 'Toca para elegir o arrastra fotos aquí'}
         </span>
         <span className="text-xs text-muted">JPG, PNG, WEBP o BMP · se comprimen en tu navegador</span>
@@ -99,7 +117,7 @@ export function ImagenesReferencia({
         ref={inputRef}
         type="file"
         accept="image/jpeg,image/png,image/webp,image/bmp,.jpg,.jpeg,.png,.webp,.bmp"
-        multiple
+        multiple={maxImagenes > 1}
         className="sr-only"
         tabIndex={-1}
         aria-hidden="true"
@@ -114,9 +132,9 @@ export function ImagenesReferencia({
 
       {/* Miniaturas */}
       {imagenes.length > 0 && (
-        <ul className="mt-4 grid grid-cols-3 gap-3 sm:grid-cols-5" aria-label="Imágenes de referencia añadidas">
+        <ul className="mt-4 grid grid-cols-2 gap-3" aria-label="Imágenes de referencia añadidas">
           {imagenes.map((img, i) => {
-            const etiqueta = `Image ${i + 1}`;
+            const etiqueta = etiquetaRol(i, maxImagenes);
             return (
               <li
                 key={img.id}
@@ -124,8 +142,8 @@ export function ImagenesReferencia({
               >
                 <img
                   src={img.dataUrl}
-                  alt={`Foto de referencia ${i + 1}: ${img.nombre}`}
-                  className="aspect-square w-full object-cover"
+                  alt={`${etiqueta}: ${img.nombre}`}
+                  className="aspect-video w-full object-cover"
                   loading="lazy"
                 />
                 <span className="absolute left-1.5 top-1.5 rounded-md bg-black/70 px-1.5 py-0.5 text-[11px] font-semibold text-white">
@@ -140,19 +158,6 @@ export function ImagenesReferencia({
                 >
                   <X className="h-4 w-4" aria-hidden="true" />
                 </button>
-                <div className="p-1.5">
-                  <Button
-                    variant="ghost"
-                    onClick={() => onInsertarEnPrompt(etiqueta)}
-                    disabled={deshabilitado}
-                    className="w-full !px-1 !py-1 text-[11px]"
-                    aria-label={`Insertar ${etiqueta} en la descripción`}
-                    title={`Añade "${etiqueta}" a tu descripción`}
-                  >
-                    <TextCursorInput className="h-3.5 w-3.5" aria-hidden="true" />
-                    Usar en el prompt
-                  </Button>
-                </div>
               </li>
             );
           })}
@@ -160,9 +165,8 @@ export function ImagenesReferencia({
       )}
 
       <p className="mt-3 text-[11px] leading-relaxed text-muted">
-        Las imágenes de referencia guían al modelo; el parecido con la persona es interpretativo, no
-        una réplica exacta. Las imágenes no se guardan en el historial ni en la galería: consérvalas
-        para reutilizarlas.
+        Las imágenes guían al modelo; el parecido es interpretativo, no una réplica exacta. No se
+        guardan en el historial ni en la galería: consérvalas para reutilizarlas.
       </p>
     </Card>
   );

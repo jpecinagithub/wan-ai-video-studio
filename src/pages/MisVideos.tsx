@@ -22,9 +22,6 @@ import { descargarVideo } from '../utils/download';
 import { cn, formatFecha, truncate } from '../utils/format';
 import type { VideoRecord, VideoStatus } from '../types';
 
-/** Clave donde se guarda el taskId remoto para retomar el seguimiento en el Estudio. */
-const CLAVE_TAREA_PENDIENTE = 'wan-studio:tarea-pendiente';
-
 /** Colores del badge de estado (tema oscuro + light). */
 const COLORES_ESTADO: Record<VideoStatus, string> = {
   pendiente: 'bg-amber-500/15 text-amber-400 border-amber-500/30',
@@ -49,7 +46,7 @@ function nombreModelo(id: VideoRecord['modelId']): string {
 /**
  * Galería local de vídeos generados (el historial se limita a 20 registros
  * en la capa de datos). Los metadatos viven en el dispositivo; los enlaces
- * del proveedor caducan a las 24h.
+ * del almacenamiento del proveedor caducan a los 30 días.
  */
 export function MisVideos() {
   const navigate = useNavigate();
@@ -99,13 +96,9 @@ export function MisVideos() {
   };
 
   const reanudarSeguimiento = (v: VideoRecord) => {
-    if (!v.taskIdRemoto) return;
-    try {
-      window.localStorage.setItem(CLAVE_TAREA_PENDIENTE, v.taskIdRemoto);
-    } catch {
-      // Sin acceso a localStorage: se navega igualmente al Estudio.
-    }
-    navigate('/');
+    if (!v.solicitud) return;
+    // El Estudio retoma la solicitud idéntica sin volver a facturar.
+    navigate('/', { state: { replay: { solicitud: v.solicitud, recordId: v.id } } });
   };
 
   const confirmarEliminar = async (v: VideoRecord) => {
@@ -192,7 +185,7 @@ export function MisVideos() {
           const puedeReanudar =
             v.seguimientoDetenido &&
             (v.estado === 'pendiente' || v.estado === 'procesando') &&
-            Boolean(v.taskIdRemoto);
+            Boolean(v.solicitud);
 
           return (
             <Card key={v.id}>
@@ -246,8 +239,8 @@ export function MisVideos() {
               )}
               {enlaceCaducado && (
                 <p className="mt-3 text-xs text-amber-400" role="note">
-                  El enlace del proveedor ha caducado (24h). Descarga tus vídeos antes de que
-                  caduquen.
+                  El enlace del almacenamiento ha caducado (30 días). Descarga tus vídeos antes de
+                  que caduquen.
                 </p>
               )}
 

@@ -3,136 +3,86 @@ import type { ModelIdApi } from './validation.js';
 
 /**
  * ═══════════════════════════════════════════════════════════════════
- *  Proveedor REAL — Alibaba Cloud Model Studio (verificado 2026-10-09)
+ *  Proveedor REAL — Pollinations (gen.pollinations.ai), verificado 2026-10-14
  * ═══════════════════════════════════════════════════════════════════
  *
- * Endpoints verificados contra la documentación oficial:
- * - Crear tarea:  POST {base}/services/aigc/video-generation/video-synthesis
- *   con cabecera X-DashScope-Async: enable (obligatoria; sin ella → 403).
- * - Estado:       GET  {base}/tasks/{task_id} con Authorization: Bearer <key>.
+ * Endpoints verificados contra la documentación oficial y el OpenAPI en vivo:
+ * - Generar vídeo: GET {base}/video/{prompt}?model=…&duration=…&resolution=…
+ *   &aspectRatio=…&audio=…&seed=…&image=url1|url2  → 200 con el MP4 directo.
+ *   La generación es SÍNCRONA: la misma petición reintentada de forma
+ *   idéntica (mismos parámetros y seed) no se vuelve a facturar: el
+ *   proveedor espera a la generación en curso o devuelve el resultado
+ *   cacheado. Solo la generación se factura; reintentos y cache no.
+ * - Subir medios: POST https://media.pollinations.ai/upload → {id, url, …}.
+ *   Las imágenes de referencia y el MP4 resultante se alojan aquí (URLs
+ *   públicas no listadas, ciclo de vida de 30 días).
  *
+ * image[0] = fotograma inicial, image[1] = fotograma final (opcional).
  * No existe modo demo: todo lo que aquí corre habla con el proveedor real.
+ * La API key NUNCA sale de aquí: no se registra, no se devuelve al cliente.
  */
 
-export type EstadoTareaProveedor =
-  | 'pending'
-  | 'processing'
-  | 'succeeded'
-  | 'failed'
-  | 'cancelled'
-  | 'unknown';
-
-export interface EntradaCrearVideo {
+export interface EntradaGenerarVideo {
   modelId: ModelIdApi;
   prompt: string;
   duracionSegundos: number;
   resolucion: '480p' | '720p' | '1080p';
-  /** 'adaptive' | '16:9' | '21:9' | '9:16' | '1:1' | '4:3' | '3:4' (se normaliza 'auto' → 'adaptive'). */
-  aspecto: string;
+  aspecto: '16:9' | '9:16';
   audio: boolean;
   semilla?: number;
-  mejoraPrompt?: boolean;
-  marcaAgua?: boolean;
-  idPeticionCliente?: string;
-  /** Imágenes de referencia (máx. 10, data URI base64). Se envían en input.media. */
-  media?: Array<{ type: 'reference_image'; url: string }>;
-}
-
-export interface UsoTareaProveedor {
-  duracion?: number;
-  fps?: number;
-  ratio?: string;
-}
-
-export interface InfoTareaProveedor {
-  taskId: string;
-  estado: EstadoTareaProveedor;
-  videoUrl?: string;
-  mensajeError?: string;
-  uso?: UsoTareaProveedor;
-  /** Las URL de vídeo del proveedor son temporales (válidas 24h). */
-  expiraEn?: string;
-  /** Respuesta cruda del proveedor (solo para diagnóstico en servidor). */
-  cruda?: unknown;
+  /** URLs públicas https (fotograma inicial y, opcionalmente, final). */
+  imagenes?: string[];
 }
 
 export interface EntornoProveedor {
   apiKey: string;
-  region: string;
-  baseUrl: string;
 }
 
-const REGION_POR_DEFECTO = 'ap-southeast-1';
-const BASE_URL_LEGACY = 'https://dashscope-intl.aliyuncs.com/api/v1';
-const TIMEOUT_CREACION_MS = 30_000;
-const TIMEOUT_ESTADO_MS = 15_000;
-const ESPERA_REINTENTO_MS = 1_000;
+export type ResultadoVideo =
+  | { estado: 'completado'; datos: Buffer; contentType: string }
+  | { estado: 'procesando' };
+
+const BASE_VIDEO = 'https://gen.pollinations.ai';
+const BASE_MEDIA = 'https://media.pollinations.ai';
+/** Límite de la petición de vídeo: por debajo del timeout de la función serverless. */
+const TIMEOUT_VIDEO_MS = 55_000;
+const TIMEOUT_MEDIA_MS = 30_000;
 const LONGITUD_PROMPT_LOG = 60;
 
 /**
  * Lee y valida las variables de entorno del servidor.
- * Orden de resolución de la base URL (verificado 2026-10-09):
- *  1) ALIBABA_API_BASE_URL explícita gana;
- *  2) si no, se construye desde ALIBABA_REGION + ALIBABA_WORKSPACE_ID
- *     → https://{workspaceId}.{region}.maas.aliyuncs.com/api/v1;
- *  3) si no, legacy https://dashscope-intl.aliyuncs.com/api/v1.
- * Solo ALIBABA_API_KEY es obligatoria. La API key NUNCA sale de aquí:
- * no se registra, no se devuelve al cliente.
+ * Solo POLLINATIONS_API_KEY es obligatoria (clave `sk_` de
+ * enter.pollinations.ai/keys). La API key NUNCA sale de aquí.
  */
 export function readProviderEnv(): EntornoProveedor {
-  const apiKey = process.env.ALIBABA_API_KEY;
+  const apiKey = process.env.POLLINATIONS_API_KEY;
   if (!apiKey) {
     throw new HttpError(
       500,
       'MISSING_CONFIGURATION',
-      'Falta la variable de entorno ALIBABA_API_KEY en el servidor. Revisa la configuración en Vercel.',
+      'Falta la variable de entorno POLLINATIONS_API_KEY en el servidor. Créala en enter.pollinations.ai/keys y configúrala en Vercel.',
     );
   }
-
-  const explicita = (process.env.ALIBABA_API_BASE_URL ?? '').trim();
-  const region = (process.env.ALIBABA_REGION ?? '').trim() || REGION_POR_DEFECTO;
-
-  let baseUrl: string;
-  if (explicita) {
-    baseUrl = explicita.replace(/\/+$/, '');
-  } else {
-    const workspaceId = (process.env.ALIBABA_WORKSPACE_ID ?? '').trim();
-    baseUrl = workspaceId
-      ? `https://${workspaceId}.${region}.maas.aliyuncs.com/api/v1`
-      : BASE_URL_LEGACY;
-  }
-
-  return { apiKey, region, baseUrl };
-}
-
-/** 480p → 480P (el proveedor exige mayúsculas). */
-function resolucionApi(resolucion: EntradaCrearVideo['resolucion']): string {
-  return resolucion.toUpperCase();
-}
-
-/** 'auto' → 'adaptive'; el resto de ratios se pasan tal cual. */
-function ratioApi(aspecto: string): string {
-  return aspecto === 'auto' ? 'adaptive' : aspecto;
+  return { apiKey };
 }
 
 function truncarPrompt(prompt: string): string {
-  return prompt.length > LONGITUD_PROMPT_LOG
-    ? `${prompt.slice(0, LONGITUD_PROMPT_LOG)}…`
-    : prompt;
+  return prompt.length > LONGITUD_PROMPT_LOG ? `${prompt.slice(0, LONGITUD_PROMPT_LOG)}…` : prompt;
 }
 
-/** Log de servidor sanitizado: nunca la key, prompt truncado, con request_id. */
+/** Log de servidor sanitizado: nunca la key, prompt truncado. */
 function logProveedor(evento: string, detalle: Record<string, unknown>): void {
-  console.log(JSON.stringify({ ambito: 'alibaba-provider', evento, ...detalle }));
+  console.log(JSON.stringify({ ambito: 'pollinations-provider', evento, ...detalle }));
 }
 
 function esErrorAbortado(err: unknown): boolean {
   return (
-    err instanceof DOMException && err.name === 'AbortError' ||
+    (err instanceof DOMException && err.name === 'AbortError') ||
     (err instanceof Error && err.name === 'AbortError')
   );
 }
 
+/** Lee un cuerpo de error JSON sin lanzar ({status, error:{code,message}}). */
 async function leerCuerpoSeguro(respuesta: Response): Promise<Record<string, any>> {
   try {
     const json = (await respuesta.json()) as unknown;
@@ -142,196 +92,136 @@ async function leerCuerpoSeguro(respuesta: Response): Promise<Record<string, any
   }
 }
 
-function mapearEstadoProveedor(estado: unknown): EstadoTareaProveedor {
-  switch (typeof estado === 'string' ? estado.toUpperCase() : '') {
-    case 'PENDING':
-      return 'pending';
-    case 'RUNNING':
-      return 'processing';
-    case 'SUCCEEDED':
-      return 'succeeded';
-    case 'FAILED':
-      return 'failed';
-    case 'CANCELED':
-      return 'cancelled';
-    default:
-      // UNKNOWN (tarea inexistente o caducada) u otros valores no documentados.
-      return 'unknown';
+/** Decodifica un data URI de imagen a sus bytes y su tipo de contenido. */
+export function decodificarDataUrl(dataUrl: string): { datos: Buffer; contentType: string } {
+  const coincidencia = /^data:(image\/(?:jpeg|jpg|png|webp|bmp));base64,([A-Za-z0-9+/]+={0,2})$/.exec(
+    dataUrl,
+  );
+  if (!coincidencia) {
+    throw new HttpError(400, 'BAD_REQUEST', 'La imagen de referencia no es un data URI válido.');
   }
-}
-
-function esperar(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+  const contentType = coincidencia[1] === 'image/jpg' ? 'image/jpeg' : coincidencia[1];
+  return { datos: Buffer.from(coincidencia[2], 'base64'), contentType };
 }
 
 /**
- * Proveedor de generación de vídeo (Alibaba Cloud Model Studio).
- * La cancelación en el proveedor NO está verificada: no se implementa.
+ * Proveedor de generación de vídeo (Pollinations).
+ * La generación es síncrona; ante un timeout propio se devuelve
+ * {estado:'procesando'} para que el cliente reintente la petición
+ * idéntica (el proveedor la retoma sin volver a facturar).
  */
-export class AlibabaVideoProvider {
+export class PollinationsVideoProvider {
   constructor(private readonly env: EntornoProveedor) {}
 
-  /**
-   * Crea una tarea de generación (asíncrona) en el proveedor.
-   * SIN reintento automático: un reintento podría duplicar la tarea
-   * (las peticiones fallidas no se facturan, pero las duplicadas sí).
-   */
-  async crearTareaVideo(entrada: EntradaCrearVideo): Promise<InfoTareaProveedor> {
-    const parameters: Record<string, unknown> = {
-      resolution: resolucionApi(entrada.resolucion),
-      ratio: ratioApi(entrada.aspecto),
-      duration: entrada.duracionSegundos,
-      audio: entrada.audio,
-    };
-    // Solo los parámetros opcionales definidos (regla oficial).
-    if (entrada.semilla !== undefined) parameters.seed = entrada.semilla;
-    if (entrada.mejoraPrompt !== undefined) parameters.prompt_extend = entrada.mejoraPrompt;
-    if (entrada.marcaAgua !== undefined) parameters.watermark = entrada.marcaAgua;
-
-    const url = `${this.env.baseUrl}/services/aigc/video-generation/video-synthesis`;
-    const imagenes = entrada.media?.length ?? 0;
-
-    const input: Record<string, unknown> = { prompt: entrada.prompt };
-    if (imagenes > 0) {
-      // Modo con imágenes de referencia: el prompt las menciona como "Image 1", "Image 2", ...
-      input.media = entrada.media!.map((m) => ({ type: m.type, url: m.url }));
+  /** Construye la URL de generación (determinista: base de la idempotencia). */
+  urlGeneracion(entrada: EntradaGenerarVideo): string {
+    const params = new URLSearchParams({
+      model: entrada.modelId,
+      duration: String(entrada.duracionSegundos),
+      resolution: entrada.resolucion,
+      aspectRatio: entrada.aspecto,
+      audio: entrada.audio ? 'true' : 'false',
+    });
+    if (entrada.semilla !== undefined) params.set('seed', String(entrada.semilla));
+    if (entrada.imagenes && entrada.imagenes.length > 0) {
+      params.set('image', entrada.imagenes.join('|'));
     }
+    return `${BASE_VIDEO}/video/${encodeURIComponent(entrada.prompt)}?${params.toString()}`;
+  }
+
+  async generarVideo(entrada: EntradaGenerarVideo): Promise<ResultadoVideo> {
+    const url = this.urlGeneracion(entrada);
+    const resumen = {
+      modelo: entrada.modelId,
+      duracion: entrada.duracionSegundos,
+      resolucion: entrada.resolucion,
+      prompt: truncarPrompt(entrada.prompt),
+      imagenes: entrada.imagenes?.length ?? 0,
+    };
 
     let respuesta: Response;
     try {
       respuesta = await fetch(url, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${this.env.apiKey}`,
-          'X-DashScope-Async': 'enable',
-        },
-        body: JSON.stringify({
-          model: entrada.modelId,
-          input,
-          parameters,
-        }),
-        signal: AbortSignal.timeout(TIMEOUT_CREACION_MS),
+        method: 'GET',
+        headers: { Authorization: `Bearer ${this.env.apiKey}` },
+        signal: AbortSignal.timeout(TIMEOUT_VIDEO_MS),
       });
     } catch (err) {
       if (esErrorAbortado(err)) {
-        logProveedor('crear_timeout', { prompt: truncarPrompt(entrada.prompt), imagenes });
-      } else {
-        logProveedor('crear_red_error', { prompt: truncarPrompt(entrada.prompt), imagenes });
+        // Timeout propio: la generación puede seguir en el proveedor.
+        // El cliente reintentará la petición idéntica y la retomará.
+        logProveedor('video_timeout_propio', resumen);
+        return { estado: 'procesando' };
       }
-      throw new HttpError(
-        502,
-        'PROVIDER_ERROR',
-        'No se pudo contactar con Alibaba Cloud Model Studio.',
-      );
+      logProveedor('video_red_error', resumen);
+      throw new HttpError(502, 'PROVIDER_ERROR', 'No se pudo contactar con Pollinations.');
     }
-
-    const cuerpo = await leerCuerpoSeguro(respuesta);
-    const requestId = cuerpo.request_id as string | undefined;
 
     if (!respuesta.ok) {
-      logProveedor('crear_error', {
+      const cuerpo = await leerCuerpoSeguro(respuesta);
+      const errorProv = (cuerpo.error ?? {}) as { code?: string; message?: string };
+      logProveedor('video_error', {
+        ...resumen,
         status: respuesta.status,
-        code: cuerpo.code,
-        requestId,
-        prompt: truncarPrompt(entrada.prompt),
-        imagenes,
+        code: errorProv.code,
       });
-      throw mapProviderError(respuesta.status, cuerpo.code, cuerpo.message);
+      throw mapProviderError(respuesta.status, errorProv.code, errorProv.message);
     }
 
-    const salida = (cuerpo.output ?? {}) as Record<string, unknown>;
-    const taskId = salida.task_id as string | undefined;
-    if (!taskId) {
-      logProveedor('crear_sin_task_id', { requestId, prompt: truncarPrompt(entrada.prompt), imagenes });
+    const contentType = respuesta.headers.get('content-type') ?? '';
+    if (!/video|octet-stream/i.test(contentType)) {
+      logProveedor('video_contenido_inesperado', { ...resumen, contentType });
       throw new HttpError(
         502,
         'PROVIDER_ERROR',
-        'El proveedor no devolvió un identificador de tarea. Inténtalo de nuevo.',
+        'El proveedor devolvió una respuesta inesperada. Inténtalo de nuevo.',
       );
     }
 
-    logProveedor('crear_ok', { taskId, requestId, prompt: truncarPrompt(entrada.prompt), imagenes });
-    return { taskId, estado: 'pending', cruda: salida };
+    const datos = Buffer.from(await respuesta.arrayBuffer());
+    if (datos.length === 0) {
+      throw new HttpError(502, 'PROVIDER_ERROR', 'El proveedor devolvió un vídeo vacío.');
+    }
+
+    logProveedor('video_ok', { ...resumen, bytes: datos.length });
+    return { estado: 'completado', datos, contentType: contentType || 'video/mp4' };
   }
 
   /**
-   * Consulta el estado de una tarea existente.
-   * 1 reintento (1s de espera) solo en 5xx o fallo de red.
+   * Sube un binario al almacenamiento de medios de Pollinations.
+   * Devuelve la URL pública (no listada, ciclo de vida de 30 días).
    */
-  async obtenerTareaVideo(taskId: string): Promise<InfoTareaProveedor> {
-    const url = `${this.env.baseUrl}/tasks/${encodeURIComponent(taskId)}`;
-
-    let respuesta: Response | undefined;
-    let ultimoErrorRed: unknown;
-    for (let intento = 0; intento < 2; intento++) {
-      try {
-        const candidata = await fetch(url, {
-          method: 'GET',
-          headers: { Authorization: `Bearer ${this.env.apiKey}` },
-          signal: AbortSignal.timeout(TIMEOUT_ESTADO_MS),
-        });
-        if (candidata.status >= 500 && intento === 0) {
-          logProveedor('estado_reintento_5xx', { taskId, status: candidata.status });
-          await candidata.arrayBuffer().catch(() => undefined);
-          await esperar(ESPERA_REINTENTO_MS);
-          continue;
-        }
-        respuesta = candidata;
-        break;
-      } catch (err) {
-        ultimoErrorRed = err;
-        if (intento === 0) {
-          logProveedor('estado_reintento_red', { taskId });
-          await esperar(ESPERA_REINTENTO_MS);
-          continue;
-        }
-      }
-    }
-
-    if (!respuesta) {
-      logProveedor('estado_red_error', { taskId, abortado: esErrorAbortado(ultimoErrorRed) });
-      throw new HttpError(
-        502,
-        'PROVIDER_ERROR',
-        'No se pudo contactar con Alibaba Cloud Model Studio.',
-      );
+  async subirMedio(datos: Buffer, contentType: string, nombre: string): Promise<string> {
+    let respuesta: Response;
+    try {
+      respuesta = await fetch(`${BASE_MEDIA}/upload`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${this.env.apiKey}`,
+          'Content-Type': contentType,
+          'X-File-Name': nombre,
+        },
+        body: new Uint8Array(datos),
+        signal: AbortSignal.timeout(TIMEOUT_MEDIA_MS),
+      });
+    } catch (err) {
+      logProveedor('upload_red_error', { nombre, abortado: esErrorAbortado(err) });
+      throw new HttpError(502, 'PROVIDER_ERROR', 'No se pudo publicar el archivo generado.');
     }
 
     const cuerpo = await leerCuerpoSeguro(respuesta);
-    const requestId = cuerpo.request_id as string | undefined;
-
     if (!respuesta.ok) {
-      logProveedor('estado_error', { taskId, status: respuesta.status, code: cuerpo.code, requestId });
-      throw mapProviderError(respuesta.status, cuerpo.code, cuerpo.message);
+      const errorProv = (cuerpo.error ?? {}) as { code?: string; message?: string };
+      logProveedor('upload_error', { nombre, status: respuesta.status, code: errorProv.code });
+      throw mapProviderError(respuesta.status, errorProv.code, errorProv.message);
     }
 
-    const salida = (cuerpo.output ?? {}) as Record<string, unknown>;
-    const estado = mapearEstadoProveedor(salida.task_status);
-    const info: InfoTareaProveedor = { taskId, estado, cruda: salida };
-
-    if (estado === 'succeeded') {
-      const videoUrl = salida.video_url as string | undefined;
-      if (videoUrl) info.videoUrl = videoUrl;
-      const uso = (salida.usage ?? {}) as Record<string, unknown>;
-      const usoNormalizado: UsoTareaProveedor = {};
-      if (typeof uso.duration === 'number') usoNormalizado.duracion = uso.duration;
-      if (typeof uso.fps === 'number') usoNormalizado.fps = uso.fps;
-      if (typeof uso.ratio === 'string') usoNormalizado.ratio = uso.ratio;
-      if (Object.keys(usoNormalizado).length > 0) info.uso = usoNormalizado;
-      // Las URL de vídeo del proveedor son temporales: válidas 24h.
-      info.expiraEn = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+    const url = typeof cuerpo.url === 'string' ? cuerpo.url : '';
+    if (!url) {
+      logProveedor('upload_sin_url', { nombre });
+      throw new HttpError(502, 'PROVIDER_ERROR', 'El almacenamiento no devolvió una URL válida.');
     }
-
-    if (estado === 'failed') {
-      const mensaje = (salida.message as string | undefined) ?? '';
-      info.mensajeError = mensaje.trim() || 'La generación del vídeo falló en el proveedor.';
-    }
-
-    if (estado === 'unknown') {
-      logProveedor('estado_desconocido', { taskId, requestId });
-    }
-
-    return info;
+    logProveedor('upload_ok', { nombre, bytes: datos.length });
+    return url;
   }
 }

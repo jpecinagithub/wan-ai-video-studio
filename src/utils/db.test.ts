@@ -140,7 +140,7 @@ function registroBase(id: string, fecha: string): VideoRecord {
     id,
     fecha,
     prompt: `prompt ${id}`,
-    modelId: 'wan3.0-video',
+    modelId: 'bytedance/seedance-1-pro-fast',
     duracion: 5,
     resolucion: '720p',
     aspecto: '16:9',
