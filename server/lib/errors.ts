@@ -125,34 +125,40 @@ export function mapProviderError(
 ): HttpError {
   const codigo = (code ?? '').trim();
   const mensajeProveedor = (message ?? '').trim();
+  // Los códigos del proveedor vienen con puntos (p. ej. "AllocationQuota.FreeTierOnly"):
+  // se comparan por contenido, no por igualdad exacta. Se adjunta el código
+  // real al mensaje para facilitar el diagnóstico (no es información sensible).
+  const sufijoCodigo = codigo ? ` Código del proveedor: ${codigo}.` : '';
 
   if (statusHttp === 401) {
-    if (codigo === 'InvalidApiKey') {
+    if (codigo.includes('InvalidApiKey')) {
       return new HttpError(
         401,
         'UNAUTHORIZED',
-        'La API key no es válida o no corresponde a la región configurada. Revisa ALIBABA_API_KEY y ALIBABA_REGION.',
+        'La API key no es válida o no corresponde a la región configurada. Revisa ALIBABA_API_KEY y ALIBABA_REGION.' +
+          sufijoCodigo,
       );
     }
     return new HttpError(
       401,
       'UNAUTHORIZED',
-      'No autorizado: comprueba la configuración del servidor (región/workspace).',
+      'No autorizado: comprueba la configuración del servidor (región/workspace).' + sufijoCodigo,
     );
   }
 
   if (statusHttp === 403) {
-    if (codigo === 'Unpurchased' || codigo === 'FreeTierOnly') {
+    if (codigo.includes('Unpurchased') || codigo.includes('FreeTierOnly')) {
       return new HttpError(
         403,
         'FORBIDDEN',
-        'El servicio no está habilitado o la cuota gratuita se ha agotado.',
+        'El servicio no está habilitado o la cuota gratuita se ha agotado.' + sufijoCodigo,
       );
     }
     return new HttpError(
       403,
       'FORBIDDEN',
-      'El proveedor rechazó la petición (403). Revisa los permisos del modelo en Model Studio.',
+      'El proveedor rechazó la petición (403). Revisa los permisos del modelo en Model Studio.' +
+        sufijoCodigo,
     );
   }
 

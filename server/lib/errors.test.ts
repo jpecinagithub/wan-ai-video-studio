@@ -7,7 +7,7 @@ describe('mapProviderError', () => {
     expect(err.estado).toBe(401);
     expect(err.codigo).toBe('UNAUTHORIZED');
     expect(err.message).toBe(
-      'La API key no es válida o no corresponde a la región configurada. Revisa ALIBABA_API_KEY y ALIBABA_REGION.',
+      'La API key no es válida o no corresponde a la región configurada. Revisa ALIBABA_API_KEY y ALIBABA_REGION. Código del proveedor: InvalidApiKey.',
     );
   });
 
@@ -15,7 +15,7 @@ describe('mapProviderError', () => {
     const err = mapProviderError(401, 'Other', 'x');
     expect(err.estado).toBe(401);
     expect(err.message).toBe(
-      'No autorizado: comprueba la configuración del servidor (región/workspace).',
+      'No autorizado: comprueba la configuración del servidor (región/workspace). Código del proveedor: Other.',
     );
   });
 
@@ -23,18 +23,35 @@ describe('mapProviderError', () => {
     const err = mapProviderError(403, 'Unpurchased', 'Service not purchased.');
     expect(err.estado).toBe(403);
     expect(err.codigo).toBe('FORBIDDEN');
-    expect(err.message).toBe('El servicio no está habilitado o la cuota gratuita se ha agotado.');
+    expect(err.message).toBe(
+      'El servicio no está habilitado o la cuota gratuita se ha agotado. Código del proveedor: Unpurchased.',
+    );
   });
 
   it('403 FreeTierOnly → cuota no habilitada o agotada', () => {
     const err = mapProviderError(403, 'FreeTierOnly', 'Free tier only.');
-    expect(err.message).toBe('El servicio no está habilitado o la cuota gratuita se ha agotado.');
+    expect(err.message).toBe(
+      'El servicio no está habilitado o la cuota gratuita se ha agotado. Código del proveedor: FreeTierOnly.',
+    );
+  });
+
+  it('403 con códigos con puntos (formato real de Alibaba) → se detectan igual', () => {
+    const agotada = mapProviderError(
+      403,
+      'AllocationQuota.FreeTierOnly',
+      'Free quota exhausted.',
+    );
+    expect(agotada.message).toContain('la cuota gratuita se ha agotado');
+    expect(agotada.message).toContain('AllocationQuota.FreeTierOnly');
+
+    const sinComprar = mapProviderError(403, 'AccessDenied.Unpurchased', 'Not purchased.');
+    expect(sinComprar.message).toContain('la cuota gratuita se ha agotado');
   });
 
   it('403 genérico → mensaje de permisos del modelo', () => {
     const err = mapProviderError(403, 'AccessDenied', 'Denied.');
     expect(err.message).toBe(
-      'El proveedor rechazó la petición (403). Revisa los permisos del modelo en Model Studio.',
+      'El proveedor rechazó la petición (403). Revisa los permisos del modelo en Model Studio. Código del proveedor: AccessDenied.',
     );
   });
 
