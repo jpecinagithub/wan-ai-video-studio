@@ -5,7 +5,10 @@ import {
   validarCombinacion,
 } from '../../server/lib/capabilities.js';
 import { HttpError, readJsonBody, requireMethod, sendError, sendOk } from '../../server/lib/errors.js';
-import { crearVideoMagicHour } from '../../server/lib/magichour.js';import { PollinationsVideoProvider, readProviderEnv } from '../../server/lib/provider.js';
+import {
+  crearVideoImagenMagicHour,
+  crearVideoMagicHour,
+} from '../../server/lib/magichour.js';import { PollinationsVideoProvider, readProviderEnv } from '../../server/lib/provider.js';
 import {
   GenerateVideoBodySchema,
   esModeloMagicHourApi,
@@ -35,7 +38,9 @@ const DIAS_VIGENCIA_URL = 30;
  * - **Magic Hour** (gratuito): generación ASÍNCRONA. Este endpoint crea el
  *   trabajo y responde 201 {estado:'pendiente', taskId}; el cliente consulta
  *   GET /api/video/status/:taskId hasta que el estado sea 'completado'.
- *   Si la generación falla, Magic Hour devuelve los créditos.
+ *   LTX 2.5 es texto a vídeo; MiniMax H3 es imagen a vídeo (requiere 1
+ *   file_path de /api/video/media-mh). Si la generación falla, Magic Hour
+ *   devuelve los créditos.
  *
  * No hay límite de simultaneidad propio: cada proveedor aplica el suyo (429).
  * Modo real, sin demo (decisión expresa del usuario).
@@ -65,11 +70,61 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
 
     // ── Rama Magic Hour (gratuita, asíncrona) ──────────────────────────
     if (esModeloMagicHourApi(datos.modelId)) {
-      if ((datos.imageUrls?.length ?? 0) > 0) {
+      const esImagenVideo = datos.modelId === 'magichour/minimax-h3';
+      const numUrls = datos.imageUrls?.length ?? 0;
+      const numRutas = datos.imageFilePaths?.length ?? 0;
+
+      if (esImagenVideo) {
+        // MiniMax H3: imagen a vídeo; exige exactamente 1 imagen ya alojada
+        // en Magic Hour (file_path vía /api/video/media-mh).
+        if (numUrls > 0) {
+          throw new HttpError(
+            400,
+            'BAD_REQUEST',
+            'MiniMax H3 usa el almacenamiento de Magic Hour: sube la imagen con /api/video/media-mh.',
+          );
+        }
+        if (numRutas !== 1) {
+          throw new HttpError(
+            400,
+            'BAD_REQUEST',
+            'MiniMax H3 necesita exactamente 1 imagen de referencia (fotograma inicial).',
+          );
+        }
+        const creacion = await crearVideoImagenMagicHour({
+          prompt: datos.prompt,
+          duracion: datos.duration,
+          resolucion: datos.resolution,
+          audio: datos.audio,
+          imageFilePath: datos.imageFilePaths![0],
+        });
+        sendOk(
+          res,
+          {
+            estado: 'pendiente',
+            taskId: creacion.taskId,
+            mensaje: 'Trabajo creado en Magic Hour. Consultando el estado…',
+            creditosEstimados: creacion.creditosEstimados,
+            metadatos: {
+              modelo: datos.modelId,
+              nombreModelo: obtenerCapacidad(datos.modelId)?.nombre,
+              duracion: datos.duration,
+              resolucion: datos.resolution,
+              aspecto: datos.aspectRatio,
+              gratuito: true,
+            },
+          },
+          201,
+        );
+        return;
+      }
+
+      // LTX 2.5: solo texto a vídeo.
+      if (numUrls > 0 || numRutas > 0) {
         throw new HttpError(
           400,
           'BAD_REQUEST',
-          'El modelo gratuito (LTX 2.5) es solo texto a vídeo: no admite imágenes de referencia.',
+          'El modelo gratuito LTX 2.5 es solo texto a vídeo: no admite imágenes de referencia.',
         );
       }
       const creacion = await crearVideoMagicHour({

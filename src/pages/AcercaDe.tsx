@@ -64,10 +64,11 @@ export function AcercaDe() {
             <p>
               <strong className="text-ink">Magic Hour (gratis):</strong> al registrarte en{' '}
               <span className="font-medium text-ink">magichour.ai</span> recibes créditos gratuitos
-              (sin tarjeta) y una clave de API. El modelo LTX 2.5 genera clips de 4 a 30 segundos
-              con audio incluido, sin coste adicional. Si la generación falla, los créditos se
-              devuelven. Ten en cuenta que es un proveedor más pequeño y la calidad puede ser
-              inferior a la de los modelos de pago.
+              (sin tarjeta) y una clave de API. El modelo LTX 2.5 (texto a vídeo) genera clips de
+              4 a 30 segundos con audio incluido, sin coste adicional; MiniMax H3 (imagen a vídeo)
+              anima una de tus imágenes con audio nativo, en clips de 3 a 30 segundos. Si la
+              generación falla, los créditos se devuelven. Ten en cuenta que es un proveedor más
+              pequeño y la calidad puede ser inferior a la de los modelos de pago.
             </p>
           </div>
         </Card>

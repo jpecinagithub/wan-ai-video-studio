@@ -13,11 +13,12 @@ const cuerpoValido = {
 };
 
 describe('MODEL_IDS', () => {
-  it('contiene los modelos de Pollinations y el gratuito de Magic Hour', () => {
+  it('contiene los modelos de Pollinations y los gratuitos de Magic Hour', () => {
     expect([...MODEL_IDS]).toEqual([
       'bytedance/seedance-1-pro-fast',
       'google/veo-3.1-fast',
       'magichour/ltx-2.5',
+      'magichour/minimax-h3',
     ]);
   });
 });

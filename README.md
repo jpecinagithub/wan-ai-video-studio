@@ -2,8 +2,8 @@
 
 Estudio serverless de generación de vídeo con inteligencia artificial: transforma
 descripciones de texto en vídeos con modelos de **Pollinations** (Seedance Pro Fast de
-ByteDance y Veo 3.1 Fast de Google, de pago) y de **Magic Hour** (LTX 2.5, gratuito con
-créditos al registrarse, sin tarjeta).
+ByteDance y Veo 3.1 Fast de Google, de pago) y de **Magic Hour** (LTX 2.5 para texto a
+vídeo y MiniMax H3 para imagen a vídeo, gratuitos con créditos al registrarse, sin tarjeta).
 
 Interfaz en **español**, mobile-first, tema oscuro, instalable como PWA. Sin cuentas de
 usuario: tus prompts, favoritos e historial viven únicamente en tu dispositivo.
@@ -26,9 +26,11 @@ usuario: tus prompts, favoritos e historial viven únicamente en tu dispositivo.
 - **Estudio de generación**: prompt, modelo, duración, resolución (480p / 720p / 1080p),
   relación de aspecto (16:9, 9:16), audio y semilla.
 - **Dos proveedores**: Pollinations de pago (Seedance Pro Fast 2–10 s; Veo 3.1 Fast 4/6/8 s
-  con audio) y Magic Hour **gratuito** (LTX 2.5: 4–30 s con audio, solo texto a vídeo).
-- **Imagen a vídeo** (modelos de Pollinations): hasta 1 imagen (fotograma inicial) en
-  Seedance y 2 (inicial + final) en Veo. Se comprimen en el navegador y se suben al
+  con audio) y Magic Hour **gratuito** (LTX 2.5: texto a vídeo de 4–30 s con audio;
+  MiniMax H3: imagen a vídeo de 3–30 s con audio).
+- **Imagen a vídeo** (Pollinations y MiniMax H3): hasta 1 imagen (fotograma inicial) en
+  Seedance y MiniMax H3, y 2 (inicial + final) en Veo. Se comprimen en el navegador y
+  se suben al
   almacenamiento del proveedor antes de generar.
 - **Estimación de coste** en pollen antes de generar (tarifa por segundo × duración),
   siempre etiquetada como estimación. $1 ≈ 1 pollen. El modelo gratuito muestra «Gratis».
@@ -141,7 +143,7 @@ Nunca subas `.env.local` ni ninguna clave al repositorio (están en `.gitignore`
 En el panel del proyecto → **Settings → Environment Variables**, añade para el entorno
 **Production** (y Preview si quieres probar ramas):
 
-- `MAGIC_HOUR_API_KEY` = tu clave gratuita de Magic Hour (para el modelo LTX 2.5)
+- `MAGIC_HOUR_API_KEY` = tu clave gratuita de Magic Hour (para LTX 2.5 y MiniMax H3)
 - `POLLINATIONS_API_KEY` = tu clave `sk_` de Pollinations (para Seedance y Veo; opcional)
 
 Tras guardarlas, **redeploy** el proyecto para que las funciones las recojan.
@@ -237,9 +239,11 @@ Ejemplos:
 ### Magic Hour (gratis)
 
 Al registrarte en magichour.ai/developer (sin tarjeta) recibes créditos gratuitos y una
-clave de API. El modelo **LTX 2.5** (el `default` del plan gratuito) genera clips de
-4 a 30 segundos en 480p/720p/1080p con audio incluido sin coste extra. Si la generación
-falla, los créditos se devuelven. Límites verificados en docs.magichour.ai (2026-10-14).
+clave de API. El modelo **LTX 2.5** (el `default` del plan gratuito, texto a vídeo)
+genera clips de 4 a 30 segundos en 480p/720p/1080p con audio incluido sin coste extra;
+**MiniMax H3** (imagen a vídeo) anima una imagen inicial con audio nativo en clips de
+3 a 30 segundos. Si la generación falla, los créditos se devuelven. Límites verificados
+en docs.magichour.ai (2026-10-14).
 
 ## PWA
 

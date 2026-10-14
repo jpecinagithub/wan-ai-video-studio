@@ -114,6 +114,28 @@ export const MODELOS: CapacidadModelo[] = [
     precioAudioPorSegundo: 0,
     estadoIntegracion: 'disponible',
   },
+  {
+    id: 'magichour/minimax-h3',
+    nombre: 'MiniMax H3',
+    descripcion:
+      'Modelo gratuito de Magic Hour para imagen a vídeo: anima una imagen con audio nativo y movimientos realistas. Se paga con los créditos gratuitos de tu cuenta.',
+    caracteristicas: [
+      'Gratis: créditos al registrarse, sin tarjeta',
+      'Imagen a vídeo con audio nativo',
+      'Clips de hasta 30 segundos',
+    ],
+    velocidad: 'rápida',
+    resoluciones: ['480p', '720p', '1080p'],
+    resolucionDefecto: '480p',
+    duraciones: [3, 4, 6, 8, 10, 15, 20, 30],
+    duracionDefecto: 8,
+    maxImagenes: 1,
+    generaAudio: true,
+    tipoCoste: 'gratis',
+    precioVideoPorSegundo: { '480p': 0, '720p': 0, '1080p': 0 },
+    precioAudioPorSegundo: 0,
+    estadoIntegracion: 'disponible',
+  },
 ];
 
 export const MONEDA_PRECIOS = 'pollen';

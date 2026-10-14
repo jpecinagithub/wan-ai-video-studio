@@ -3,10 +3,12 @@ import { HttpError } from './errors.js';
 import {
   PREFIJO_TASK_MAGICHOUR,
   consultarEstadoMagicHour,
+  crearVideoImagenMagicHour,
   crearVideoMagicHour,
   esModeloMagicHour,
   idRealMagicHour,
   mapearErrorMagicHour,
+  subirImagenMagicHour,
 } from './magichour.js';
 
 function respuestaJson(datos: unknown, status = 200): Response {
@@ -105,6 +107,127 @@ describe('crearVideoMagicHour', () => {
     } catch (err) {
       expect((err as HttpError).estado).toBe(401);
       expect((err as HttpError).codigo).toBe('UNAUTHORIZED');
+    }
+  });
+});
+
+describe('crearVideoImagenMagicHour', () => {
+  it('envía POST a /image-to-video con minimax-h3, image_file_path y sin aspect_ratio', async () => {
+    conClave();
+    const fetchMock = vi.fn().mockResolvedValue(respuestaJson({ id: 'cuid-img', credits_charged: 120 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const resultado = await crearVideoImagenMagicHour({
+      prompt: 'Cámara orbitando alrededor de la botella.',
+      duracion: 5,
+      resolucion: '480p',
+      audio: true,
+      imageFilePath: 'api-assets/xyz/botella.png',
+    });
+
+    expect(resultado.taskId).toBe(`${PREFIJO_TASK_MAGICHOUR}cuid-img`);
+    expect(resultado.creditosEstimados).toBe(120);
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe('https://api.magichour.ai/v1/image-to-video');
+    const cuerpo = JSON.parse(init.body as string) as Record<string, unknown>;
+    expect(cuerpo.end_seconds).toBe(5);
+    expect(cuerpo.model).toBe('minimax-h3');
+    expect(cuerpo.resolution).toBe('480p');
+    expect(cuerpo.audio).toBe(true);
+    expect('aspect_ratio' in cuerpo).toBe(false);
+    expect((cuerpo.style as { prompt: string }).prompt).toBe(
+      'Cámara orbitando alrededor de la botella.',
+    );
+    expect((cuerpo.assets as { image_file_path: string }).image_file_path).toBe(
+      'api-assets/xyz/botella.png',
+    );
+  });
+
+  it('sin id en la respuesta lanza 502 PROVIDER_ERROR', async () => {
+    conClave();
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(respuestaJson({})));
+    try {
+      await crearVideoImagenMagicHour({
+        prompt: 'x',
+        duracion: 3,
+        resolucion: '480p',
+        audio: false,
+        imageFilePath: 'api-assets/a/b.png',
+      });
+      expect.unreachable('debería haber lanzado');
+    } catch (err) {
+      expect((err as HttpError).estado).toBe(502);
+    }
+  });
+});
+
+describe('subirImagenMagicHour', () => {
+  it('solicita la URL firmada, sube los bytes con PUT y devuelve el file_path', async () => {
+    conClave();
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        respuestaJson({
+          items: [{ upload_url: 'https://firmada.ejemplo/subir', file_path: 'api-assets/id/ref.jpg' }],
+        }),
+      )
+      .mockResolvedValueOnce(new Response(null, { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const datos = new Uint8Array([1, 2, 3]);
+    const filePath = await subirImagenMagicHour(datos, 'image/jpeg', 'ref.jpg');
+
+    expect(filePath).toBe('api-assets/id/ref.jpg');
+    const [url1, init1] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url1).toBe('https://api.magichour.ai/v1/files/upload-urls');
+    const cuerpo = JSON.parse(init1.body as string) as { items: Array<{ type: string; extension: string }> };
+    expect(cuerpo.items[0]).toEqual({ type: 'image', extension: 'jpg' });
+    const [url2, init2] = fetchMock.mock.calls[1] as [string, RequestInit];
+    expect(url2).toBe('https://firmada.ejemplo/subir');
+    expect(init2.method).toBe('PUT');
+    expect((init2.headers as Record<string, string>)['Content-Type']).toBe('image/jpeg');
+  });
+
+  it('un mime no soportado lanza 400 antes de llamar a la API', async () => {
+    conClave();
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    try {
+      await subirImagenMagicHour(new Uint8Array([1]), 'image/gif', 'a.gif');
+      expect.unreachable('debería haber lanzado');
+    } catch (err) {
+      expect((err as HttpError).estado).toBe(400);
+    }
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('si el proveedor no devuelve upload_url lanza 502', async () => {
+    conClave();
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(respuestaJson({ items: [] })));
+    try {
+      await subirImagenMagicHour(new Uint8Array([1]), 'image/png', 'a.png');
+      expect.unreachable('debería haber lanzado');
+    } catch (err) {
+      expect((err as HttpError).estado).toBe(502);
+    }
+  });
+
+  it('si el PUT de subida falla lanza 502', async () => {
+    conClave();
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        respuestaJson({
+          items: [{ upload_url: 'https://firmada.ejemplo/subir', file_path: 'api-assets/id/a.png' }],
+        }),
+      )
+      .mockResolvedValueOnce(new Response(null, { status: 403 }));
+    vi.stubGlobal('fetch', fetchMock);
+    try {
+      await subirImagenMagicHour(new Uint8Array([1]), 'image/png', 'a.png');
+      expect.unreachable('debería haber lanzado');
+    } catch (err) {
+      expect((err as HttpError).estado).toBe(502);
     }
   });
 });

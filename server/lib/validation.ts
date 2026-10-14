@@ -21,6 +21,7 @@ export const MODEL_IDS = [
   'bytedance/seedance-1-pro-fast',
   'google/veo-3.1-fast',
   'magichour/ltx-2.5',
+  'magichour/minimax-h3',
 ] as const;
 export type ModelIdApi = (typeof MODEL_IDS)[number];
 
@@ -78,6 +79,14 @@ export const GenerateVideoBodySchema = z.object({
   imageUrls: z
     .array(z.string().regex(URL_PUBLICA, 'La URL de imagen no es válida.'))
     .max(MAX_IMAGENES, 'El máximo es 2 imágenes (fotograma inicial y final).')
+    .optional(),
+  /**
+   * Rutas de archivo ya alojadas en el almacenamiento de Magic Hour
+   * (file_path, vía /api/video/media-mh). Solo para magichour/minimax-h3.
+   */
+  imageFilePaths: z
+    .array(z.string().min(1).max(300))
+    .max(1, 'El máximo es 1 imagen (fotograma inicial).')
     .optional(),
 });
 

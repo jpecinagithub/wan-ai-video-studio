@@ -14,7 +14,8 @@ export type VideoStatus = 'pendiente' | 'procesando' | 'completado' | 'error' | 
 export type ModelId =
   | 'bytedance/seedance-1-pro-fast'
   | 'google/veo-3.1-fast'
-  | 'magichour/ltx-2.5';
+  | 'magichour/ltx-2.5'
+  | 'magichour/minimax-h3';
 
 /** true si el modelo es del proveedor gratuito (Magic Hour). */
 export function esModeloGratuito(modelId: ModelId): boolean {
@@ -45,6 +46,11 @@ export interface GenerationRequest {
    * No se persisten en el historial.
    */
   imageUrls?: string[];
+  /**
+   * Rutas de archivo ya alojadas en Magic Hour (file_path, vía
+   * /api/video/media-mh). Solo para magichour/minimax-h3.
+   */
+  imageFilePaths?: string[];
 }
 
 /**

@@ -3,12 +3,13 @@ import { HttpError } from './errors.js';
 import { MODELOS, MONEDA_PRECIOS, estimarCostePollen, validarCombinacion } from './capabilities.js';
 
 describe('registro de modelos', () => {
-  it('expone los dos modelos de Pollinations y el gratuito de Magic Hour', () => {
+  it('expone los dos modelos de Pollinations y los dos gratuitos de Magic Hour', () => {
     expect(MONEDA_PRECIOS).toBe('pollen');
     expect(MODELOS.map((m) => m.id)).toEqual([
       'bytedance/seedance-1-pro-fast',
       'google/veo-3.1-fast',
       'magichour/ltx-2.5',
+      'magichour/minimax-h3',
     ]);
   });
 
@@ -35,6 +36,15 @@ describe('registro de modelos', () => {
     expect(ltx.generaAudio).toBe(true);
     expect(ltx.duraciones).toEqual([4, 6, 8, 10, 15, 20, 30]);
     expect(ltx.resoluciones).toEqual(['480p', '720p', '1080p']);
+  });
+
+  it('MiniMax H3 (Magic Hour) es gratis, admite 1 imagen y tiene audio', () => {
+    const minimax = MODELOS.find((m) => m.id === 'magichour/minimax-h3')!;
+    expect(minimax.tipoCoste).toBe('gratis');
+    expect(minimax.maxImagenes).toBe(1);
+    expect(minimax.generaAudio).toBe(true);
+    expect(minimax.duraciones).toEqual([3, 4, 6, 8, 10, 15, 20, 30]);
+    expect(minimax.resoluciones).toEqual(['480p', '720p', '1080p']);
   });
 
   it('los modelos de Pollinations son de pago', () => {

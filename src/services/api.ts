@@ -68,11 +68,22 @@ async function request<T>(ruta: string, init?: RequestInit): Promise<T> {
 /** Cliente tipado de la API serverless. No maneja secretos. */
 export const api = {
   /**
-   * Sube una imagen de referencia (data URI) al almacenamiento del proveedor.
+   * Sube una imagen de referencia (data URI) al almacenamiento de Pollinations.
    * Devuelve su URL pública, lista para usar en la generación.
    */
   subirImagen(dataUrl: string): Promise<{ url: string }> {
     return request<{ url: string }>('/media', {
+      method: 'POST',
+      body: JSON.stringify({ dataUrl }),
+    });
+  },
+
+  /**
+   * Sube una imagen de referencia (data URI) al almacenamiento de Magic Hour.
+   * Devuelve su file_path, listo para usar en image-to-video.
+   */
+  subirImagenMH(dataUrl: string): Promise<{ filePath: string }> {
+    return request<{ filePath: string }>('/media-mh', {
       method: 'POST',
       body: JSON.stringify({ dataUrl }),
     });

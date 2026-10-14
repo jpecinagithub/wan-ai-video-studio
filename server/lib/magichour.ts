@@ -1,16 +1,22 @@
 /**
- * Proveedor Magic Hour (plan gratuito): generación de vídeo asíncrona.
+ * Proveedor Magic Hour (plan gratuito con créditos): generación de vídeo asíncrona.
  *
  * Documentación oficial (verificada 2026-10-14):
  * - POST https://api.magichour.ai/v1/text-to-video  (Bearer <api_key>)
  *   → { id, credits_charged }
+ * - POST https://api.magichour.ai/v1/image-to-video  (assets.image_file_path)
+ *   → { id, credits_charged }
+ * - POST https://api.magichour.ai/v1/files/upload-urls  (subida de imágenes)
+ *   → { items: [{ upload_url, file_path }] }; luego PUT de los bytes.
  * - GET  https://api.magichour.ai/v1/video-projects/{id}
  *   → { id, status, downloads: [{ url, expires_at }], error, credits_charged }
  *
  * Estados: draft | queued | rendering | complete | error | canceled.
- * El modelo expuesto por la app es `ltx-2.5` (el `default` del plan gratuito):
- * duraciones enteras 1-60 s, 16:9/9:16/1:1, 480p/720p/1080p, audio sin coste
- * extra, solo texto a vídeo (sin imágenes de referencia).
+ * Modelos expuestos por la app:
+ * - `ltx-2.5` (el `default` del plan gratuito): texto a vídeo, 1-60 s
+ *   enteros, 16:9/9:16/1:1, 480p/720p/1080p, audio sin coste extra.
+ * - `minimax-h3`: imagen a vídeo (1 imagen inicial), 1-30 s enteros,
+ *   480p/720p/1080p, audio nativo sin coste extra.
  */
 
 import { HttpError } from './errors.js';
@@ -23,6 +29,8 @@ function logProveedor(evento: string, detalle: Record<string, unknown>): void {
 const BASE_URL = 'https://api.magichour.ai/v1';
 
 export const MODELO_MAGICHOUR = 'magichour/ltx-2.5';
+/** Modelo de imagen a vídeo de Magic Hour (referencia inicial + audio nativo). */
+export const MODELO_MAGICHOUR_IMAGEN = 'magichour/minimax-h3';
 
 /** Prefijo de los taskId que pertenecen a Magic Hour (para /api/video/status). */
 export const PREFIJO_TASK_MAGICHOUR = 'mh-';
@@ -33,6 +41,16 @@ export interface ParametrosVideoMagicHour {
   resolucion: string;
   aspecto: string;
   audio: boolean;
+}
+
+/** Parámetros para imagen a vídeo (MiniMax H3). */
+export interface ParametrosImagenVideoMagicHour {
+  prompt: string;
+  duracion: number;
+  resolucion: string;
+  audio: boolean;
+  /** Ruta del archivo ya subido al almacenamiento de Magic Hour (file_path). */
+  imageFilePath: string;
 }
 
 export type EstadoMagicHour =
@@ -216,6 +234,101 @@ export function idRealMagicHour(taskId: string): string {
     throw new HttpError(400, 'BAD_REQUEST', 'El identificador de tarea no es válido.');
   }
   return taskId.slice(PREFIJO_TASK_MAGICHOUR.length);
+}
+
+const MIME_A_EXTENSION: Record<string, string> = {
+  'image/jpeg': 'jpg',
+  'image/png': 'png',
+  'image/webp': 'webp',
+  'image/bmp': 'bmp',
+};
+
+interface RespuestaUploadUrls {
+  items?: Array<{ upload_url?: string; file_path?: string; expires_at?: string }>;
+}
+
+/**
+ * Sube una imagen (bytes + mime) al almacenamiento de Magic Hour.
+ * Flujo documentado: POST /v1/files/upload-urls → PUT de los bytes a la
+ * URL firmada → devuelve el file_path para usarlo en image-to-video.
+ */
+export async function subirImagenMagicHour(
+  datos: Uint8Array,
+  mime: string,
+  nombre: string,
+): Promise<string> {
+  const extension = MIME_A_EXTENSION[mime];
+  if (!extension) {
+    throw new HttpError(400, 'BAD_REQUEST', `Formato de imagen no soportado: ${mime}.`);
+  }
+
+  const urls = await peticion<RespuestaUploadUrls>('/files/upload-urls', {
+    method: 'POST',
+    body: JSON.stringify({ items: [{ type: 'image', extension }] }),
+  });
+  const item = Array.isArray(urls.items) ? urls.items[0] : undefined;
+  if (!item?.upload_url || !item.file_path) {
+    logProveedor('upload_sin_url', { nombre });
+    throw new HttpError(502, 'PROVIDER_ERROR', 'Magic Hour no devolvió la URL de subida.');
+  }
+
+  let subida: Response;
+  try {
+    subida = await fetch(item.upload_url, {
+      method: 'PUT',
+      headers: { 'Content-Type': mime },
+      body: datos as unknown as BodyInit,
+    });
+  } catch (error) {
+    throw new HttpError(502, 'PROVIDER_ERROR', `No se pudo subir la imagen: ${String(error)}`);
+  }
+  if (!subida.ok) {
+    logProveedor('upload_fallido', { nombre, status: subida.status });
+    throw new HttpError(502, 'PROVIDER_ERROR', 'Magic Hour rechazó la subida de la imagen.');
+  }
+
+  logProveedor('upload_ok', { nombre, filePath: item.file_path });
+  return item.file_path;
+}
+
+/**
+ * Crea un trabajo de imagen a vídeo en Magic Hour (MiniMax H3).
+ * La imagen debe haberse subido antes con subirImagenMagicHour.
+ * El formato de salida sigue al de la imagen de entrada (sin aspect_ratio).
+ */
+export async function crearVideoImagenMagicHour(
+  parametros: ParametrosImagenVideoMagicHour,
+): Promise<ResultadoCreacion> {
+  const cuerpo = {
+    end_seconds: parametros.duracion,
+    resolution: parametros.resolucion,
+    model: 'minimax-h3',
+    audio: parametros.audio,
+    style: { prompt: parametros.prompt },
+    assets: { image_file_path: parametros.imageFilePath },
+    name: `Video Studio - ${new Date().toISOString()}`,
+  };
+
+  logProveedor('video_imagen_crear', {
+    duracion: parametros.duracion,
+    resolucion: parametros.resolucion,
+    audio: parametros.audio,
+  });
+
+  const datos = await peticion<RespuestaCreacion>('/image-to-video', {
+    method: 'POST',
+    body: JSON.stringify(cuerpo),
+  });
+
+  if (!datos.id || typeof datos.id !== 'string') {
+    logProveedor('video_imagen_crear_sin_id', {});
+    throw new HttpError(502, 'PROVIDER_ERROR', 'Magic Hour no devolvió el identificador del trabajo.');
+  }
+
+  return {
+    taskId: `${PREFIJO_TASK_MAGICHOUR}${datos.id}`,
+    creditosEstimados: typeof datos.credits_charged === 'number' ? datos.credits_charged : null,
+  };
 }
 
 /**

@@ -458,12 +458,20 @@ export function Studio() {
 
     try {
       // 1) Subir las imágenes de referencia al almacenamiento del proveedor.
-      //    Así /generate recibe solo URLs y los reintentos son idénticos.
-      //    El modelo gratuito es solo texto a vídeo: no hay nada que subir.
+      //    Así /generate recibe solo rutas/URLs y los reintentos son idénticos.
+      //    - Pollinations: URLs públicas (/api/video/media).
+      //    - MiniMax H3: file_path de Magic Hour (/api/video/media-mh).
+      //    - LTX 2.5: solo texto a vídeo, no hay nada que subir.
       setSubiendoImagenes(true);
       const urls: string[] = [];
+      const rutas: string[] = [];
       try {
-        if (maxImagenes > 0) {
+        if (modelId === 'magichour/minimax-h3') {
+          const subidas = await Promise.all(
+            imagenes.map((img) => api.subirImagenMH(img.dataUrl)),
+          );
+          for (const s of subidas) rutas.push(s.filePath);
+        } else if (maxImagenes > 0) {
           const subidas = await Promise.all(
             imagenes.map((img) => api.subirImagen(img.dataUrl)),
           );
@@ -483,6 +491,7 @@ export function Studio() {
         audio,
         seed: semillaFinal,
         imageUrls: urls.length > 0 ? urls : undefined,
+        imageFilePaths: rutas.length > 0 ? rutas : undefined,
       };
       guardarEnHistorial(solicitud.prompt);
       setModalAbierto(false);
@@ -568,8 +577,8 @@ export function Studio() {
           </h1>
           <p className="mt-2 text-sm text-muted sm:text-base">
             Describe la escena que imaginas y conviértela en vídeo: tienes modelos de pago
-            (Pollinations) y un modelo gratuito (Magic Hour). Sin tecnicismos: escribe, configura
-            y genera.
+            (Pollinations) y modelos gratuitos con créditos (Magic Hour). Sin tecnicismos:
+            escribe, configura y genera.
           </p>
         </div>
 
@@ -1236,7 +1245,11 @@ export function Studio() {
           <div>
             <dt className="text-xs text-muted">Imágenes de referencia</dt>
             <dd className="mt-0.5 font-medium">
-              {esGratis ? 'Solo texto a vídeo' : imagenes.length > 0 ? `${imagenes.length}` : 'Ninguna'}
+              {maxImagenes === 0
+                ? 'Solo texto a vídeo'
+                : imagenes.length > 0
+                  ? `${imagenes.length}`
+                  : 'Ninguna'}
             </dd>
           </div>
           <div className="col-span-2">
