@@ -44,6 +44,7 @@ import type {
   Resolution,
   VideoStatus,
 } from '../types';
+import { esModeloGratuito } from '../types';
 import { cn, formatFecha, formatSeconds, newRequestId, truncate } from '../utils/format';
 import { ErrorImagen, comprimirImagen } from '../utils/imagenes';
 import { guardarVideo, obtenerVideo } from '../utils/db';
@@ -59,6 +60,8 @@ interface GeneracionPendiente {
   solicitud: GenerationRequest;
   startedAt: string;
   recordId: string;
+  /** Identificador del trabajo en Magic Hour (con prefijo `mh-`), para reanudarlo. */
+  taskIdRemoto?: string;
 }
 
 interface VideoCompletado {
@@ -79,7 +82,7 @@ interface EstadoNavegacion {
   resolution?: Resolution;
   aspectRatio?: AspectRatio;
   audio?: boolean;
-  replay?: { solicitud: GenerationRequest; recordId: string };
+  replay?: { solicitud: GenerationRequest; recordId: string; taskIdRemoto?: string };
 }
 
 function leerTareaPendiente(): GeneracionPendiente | null {
@@ -180,9 +183,14 @@ export function Studio() {
   const valida = esCombinacionValida(parametros);
   const coste = estimarCoste(parametros);
 
-  const { fase, elapsedSegundos, intentos, iniciar, detener } = useGeneracion();
+  const { fase, elapsedSegundos, intentos, iniciar, reanudarSeguimiento: reanudarPorTaskId, detener } =
+    useGeneracion();
   const generando = enviando || fase === 'procesando';
   const puedeGenerar = prompt.trim().length > 0 && valida && !generando;
+  const esGratis = esModeloGratuito(modelId);
+  const promptMax = esGratis
+    ? CAPACIDADES.prompt.maxCaracteres
+    : CAPACIDADES.prompt.maxCaracteresPollinations;
 
   /* ---------- Finalización de la generación ---------- */
   const manejarCompletada = useCallback(async (resp: GenerationResponse) => {
@@ -287,7 +295,25 @@ export function Studio() {
         }
       }
 
-      iniciar(solicitud, { onCompletada: manejarCompletada, onError: manejarError });
+      iniciar(solicitud, {
+        onCompletada: manejarCompletada,
+        onError: manejarError,
+        // Magic Hour: guardar el taskId para poder reanudar el seguimiento.
+        onTaskCreada: (taskId) => {
+          setTareaActiva((prev) => {
+            if (!prev || prev.recordId !== recordId) return prev;
+            const actualizada = { ...prev, taskIdRemoto: taskId };
+            guardarTareaPendiente(actualizada);
+            return actualizada;
+          });
+          void (async () => {
+            const registro = await obtenerVideo(recordId).catch(() => undefined);
+            if (registro) {
+              await guardarVideo({ ...registro, taskIdRemoto: taskId }).catch(() => undefined);
+            }
+          })();
+        },
+      });
     },
     [iniciar, manejarCompletada, manejarError],
   );
@@ -306,7 +332,37 @@ export function Studio() {
       setAspecto(s.aspectRatio);
       setAudio(s.audio);
       setSemilla(s.seed !== undefined ? String(s.seed) : '');
-      void comenzarSeguimiento(s, replay.recordId);
+      if (replay.taskIdRemoto) {
+        // Magic Hour: el trabajo ya existe; seguir consultando su estado.
+        const startedAt = new Date().toISOString();
+        const pendiente: GeneracionPendiente = {
+          solicitud: s,
+          startedAt,
+          recordId: replay.recordId,
+          taskIdRemoto: replay.taskIdRemoto,
+        };
+        guardarTareaPendiente(pendiente);
+        setTareaActiva(pendiente);
+        setResultado(null);
+        setErrorTarea(null);
+        setPanelColapsado(false);
+        void (async () => {
+          const registro = await obtenerVideo(replay.recordId).catch(() => undefined);
+          if (registro) {
+            await guardarVideo({
+              ...registro,
+              estado: 'pendiente' satisfies VideoStatus,
+              seguimientoDetenido: false,
+            }).catch(() => undefined);
+          }
+        })();
+        reanudarPorTaskId(replay.taskIdRemoto, {
+          onCompletada: manejarCompletada,
+          onError: manejarError,
+        });
+      } else {
+        void comenzarSeguimiento(s, replay.recordId);
+      }
     }
     // Solo al montar: el estado de navegación no cambia después.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -403,13 +459,16 @@ export function Studio() {
     try {
       // 1) Subir las imágenes de referencia al almacenamiento del proveedor.
       //    Así /generate recibe solo URLs y los reintentos son idénticos.
+      //    El modelo gratuito es solo texto a vídeo: no hay nada que subir.
       setSubiendoImagenes(true);
       const urls: string[] = [];
       try {
-        const subidas = await Promise.all(
-          imagenes.map((img) => api.subirImagen(img.dataUrl)),
-        );
-        for (const s of subidas) urls.push(s.url);
+        if (maxImagenes > 0) {
+          const subidas = await Promise.all(
+            imagenes.map((img) => api.subirImagen(img.dataUrl)),
+          );
+          for (const s of subidas) urls.push(s.url);
+        }
       } finally {
         setSubiendoImagenes(false);
       }
@@ -461,7 +520,13 @@ export function Studio() {
         await guardarVideo({ ...registro, seguimientoDetenido: false }).catch(() => undefined);
       }
     })();
-    iniciar(pendiente.solicitud, { onCompletada: manejarCompletada, onError: manejarError });
+    const callbacks = { onCompletada: manejarCompletada, onError: manejarError };
+    // Magic Hour con trabajo ya creado: seguir consultando su estado.
+    if (pendiente.taskIdRemoto) {
+      reanudarPorTaskId(pendiente.taskIdRemoto, callbacks);
+      return;
+    }
+    iniciar(pendiente.solicitud, callbacks);
   };
 
   const descartarPendiente = () => {
@@ -502,8 +567,9 @@ export function Studio() {
             Crea vídeos con inteligencia artificial
           </h1>
           <p className="mt-2 text-sm text-muted sm:text-base">
-            Describe la escena que imaginas y los modelos de Pollinations la convertirán en vídeo.
-            Sin tecnicismos: escribe, configura y genera.
+            Describe la escena que imaginas y conviértela en vídeo: tienes modelos de pago
+            (Pollinations) y un modelo gratuito (Magic Hour). Sin tecnicismos: escribe, configura
+            y genera.
           </p>
         </div>
 
@@ -532,7 +598,19 @@ export function Studio() {
                 >
                   <div className="flex items-center justify-between gap-2">
                     <p className="font-semibold">{m.nombre}</p>
-                    {activo && <Check className="h-4 w-4 text-accent" aria-hidden="true" />}
+                    <div className="flex items-center gap-1.5">
+                      <span
+                        className={cn(
+                          'rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide',
+                          m.tipoCoste === 'gratis'
+                            ? 'bg-success/15 text-success'
+                            : 'bg-accent-soft text-accent',
+                        )}
+                      >
+                        {m.tipoCoste === 'gratis' ? 'Gratis' : 'De pago'}
+                      </span>
+                      {activo && <Check className="h-4 w-4 text-accent" aria-hidden="true" />}
+                    </div>
                   </div>
                   <p className="mt-1 text-xs text-muted">{m.descripcion}</p>
                   <ul className="mt-2 flex flex-col gap-1">
@@ -556,8 +634,12 @@ export function Studio() {
                     <span>{rangoDuracion}</span>
                   </div>
                   <p className="mt-1 text-[11px] text-muted">
-                    {m.maxImagenes === 1 ? '1 imagen de referencia' : 'Hasta 2 imágenes'} ·{' '}
-                    {m.generaAudio ? 'con audio' : 'sin audio'}
+                    {m.maxImagenes === 0
+                      ? 'Solo texto a vídeo'
+                      : m.maxImagenes === 1
+                        ? '1 imagen de referencia'
+                        : 'Hasta 2 imágenes'}{' '}
+                    · {m.generaAudio ? 'con audio' : 'sin audio'}
                   </p>
                   <p className="mt-2 text-[11px] font-medium text-muted">
                     {textoPrecioModelo(m)}
@@ -568,30 +650,32 @@ export function Studio() {
           </div>
         </Card>
 
-        {/* Imágenes de referencia */}
-        <ImagenesReferencia
-          imagenes={imagenes}
-          onAñadir={añadirImagenes}
-          onEliminar={eliminarImagen}
-          maxImagenes={maxImagenes}
-          procesando={procesandoImagenes}
-          subiendo={subiendoImagenes}
-          error={errorImagenes}
-          deshabilitado={generando}
-        />
+        {/* Imágenes de referencia (solo modelos de pago que las admitan) */}
+        {maxImagenes > 0 && (
+          <ImagenesReferencia
+            imagenes={imagenes}
+            onAñadir={añadirImagenes}
+            onEliminar={eliminarImagen}
+            maxImagenes={maxImagenes}
+            procesando={procesandoImagenes}
+            subiendo={subiendoImagenes}
+            error={errorImagenes}
+            deshabilitado={generando}
+          />
+        )}
 
         {/* Prompt */}
         <Card>
           <div className="mb-2 flex items-center justify-between">
             <FieldLabel htmlFor="prompt">Describe tu vídeo</FieldLabel>
             <span className="text-xs text-muted" aria-live="polite">
-              {prompt.length} / {CAPACIDADES.prompt.maxCaracteres}
+              {prompt.length} / {promptMax}
             </span>
           </div>
           <textarea
             id="prompt"
             value={prompt}
-            onChange={(e) => setPrompt(e.target.value.slice(0, CAPACIDADES.prompt.maxCaracteres))}
+            onChange={(e) => setPrompt(e.target.value.slice(0, promptMax))}
             rows={6}
             placeholder="Un plano aéreo cinematográfico de un castillo medieval entre montañas al amanecer… (puedes escribir en español o en inglés)"
             className="w-full resize-y rounded-xl2 border border-line bg-bg p-3 text-sm text-ink placeholder:text-muted/60 focus:border-accent focus-visible:outline-2 focus-visible:outline-accent"
@@ -796,37 +880,41 @@ export function Studio() {
             checked={audio}
             onChange={setAudio}
           />
-          <button
-            type="button"
-            onClick={() => setMostrarAvanzadas((v) => !v)}
-            aria-expanded={mostrarAvanzadas}
-            className="mt-2 inline-flex items-center gap-1 rounded-lg text-sm font-medium text-accent hover:underline focus-visible:outline-2 focus-visible:outline-accent"
-          >
-            {mostrarAvanzadas ? 'Ocultar opciones avanzadas' : 'Mostrar opciones avanzadas'}
-            <ChevronDown
-              className={cn('h-4 w-4 transition-transform', mostrarAvanzadas && 'rotate-180')}
-              aria-hidden="true"
-            />
-          </button>
-          {mostrarAvanzadas && (
-            <div className="mt-3 flex flex-col gap-3 border-t border-line pt-3">
-              <div>
-                <FieldLabel htmlFor="semilla">Semilla (opcional)</FieldLabel>
-                <input
-                  id="semilla"
-                  type="number"
-                  min={0}
-                  max={2147483647}
-                  value={semilla}
-                  onChange={(e) => setSemilla(e.target.value)}
-                  placeholder="Aleatoria"
-                  className="w-full rounded-xl2 border border-line bg-bg p-2.5 text-sm text-ink placeholder:text-muted/60 focus:border-accent focus-visible:outline-2 focus-visible:outline-accent"
+          {!esGratis && (
+            <>
+              <button
+                type="button"
+                onClick={() => setMostrarAvanzadas((v) => !v)}
+                aria-expanded={mostrarAvanzadas}
+                className="mt-2 inline-flex items-center gap-1 rounded-lg text-sm font-medium text-accent hover:underline focus-visible:outline-2 focus-visible:outline-accent"
+              >
+                {mostrarAvanzadas ? 'Ocultar opciones avanzadas' : 'Mostrar opciones avanzadas'}
+                <ChevronDown
+                  className={cn('h-4 w-4 transition-transform', mostrarAvanzadas && 'rotate-180')}
+                  aria-hidden="true"
                 />
-                <p className="mt-1 text-xs text-muted">
-                  {CAPACIDADES.avanzadas.semilla.descripcion}
-                </p>
-              </div>
-            </div>
+              </button>
+              {mostrarAvanzadas && (
+                <div className="mt-3 flex flex-col gap-3 border-t border-line pt-3">
+                  <div>
+                    <FieldLabel htmlFor="semilla">Semilla (opcional)</FieldLabel>
+                    <input
+                      id="semilla"
+                      type="number"
+                      min={0}
+                      max={2147483647}
+                      value={semilla}
+                      onChange={(e) => setSemilla(e.target.value)}
+                      placeholder="Aleatoria"
+                      className="w-full rounded-xl2 border border-line bg-bg p-2.5 text-sm text-ink placeholder:text-muted/60 focus:border-accent focus-visible:outline-2 focus-visible:outline-accent"
+                    />
+                    <p className="mt-1 text-xs text-muted">
+                      {CAPACIDADES.avanzadas.semilla.descripcion}
+                    </p>
+                  </div>
+                </div>
+              )}
+            </>
           )}
         </Card>
 
@@ -834,10 +922,17 @@ export function Studio() {
         <Card>
           <h2 className="mb-2 text-base font-semibold">Coste estimado</h2>
           <p className="text-lg font-bold text-accent">{coste.texto}</p>
-          <p className="mt-1 text-xs text-muted">
-            Se descuenta de tu saldo de Pollen de pago ($1 ≈ 1 pollen). Las peticiones fallidas no
-            se facturan.
-          </p>
+          {esGratis ? (
+            <p className="mt-1 text-xs text-muted">
+              Se descuenta de los créditos gratuitos de tu cuenta de Magic Hour (sin tarjeta). Si
+              la generación falla, los créditos se devuelven.
+            </p>
+          ) : (
+            <p className="mt-1 text-xs text-muted">
+              Se descuenta de tu saldo de Pollen de pago ($1 ≈ 1 pollen). Las peticiones fallidas no
+              se facturan.
+            </p>
+          )}
           <p className="mt-1 text-xs text-muted">
             Modelo: {modelo.nombre} · {formatSeconds(duracion)} · {resolucion}
             {imagenes.length > 0 &&
@@ -863,7 +958,8 @@ export function Studio() {
           Generar vídeo
         </Button>
         <p className="hidden text-center text-xs text-muted lg:block">
-          Al generar aceptas que la solicitud se procese en Pollinations (gen.pollinations.ai).
+          Al generar aceptas que la solicitud se procese en{' '}
+          {esGratis ? 'Magic Hour' : 'Pollinations (gen.pollinations.ai)'}.
         </p>
       </div>
 
@@ -922,8 +1018,9 @@ export function Studio() {
                     )}
                     {!errorTarea && (
                       <p className="mx-auto mt-2 max-w-md text-xs text-muted">
-                        La generación puede seguir procesándose en Pollinations. Reanudar envía la
-                        solicitud idéntica, sin coste adicional.
+                        {tareaActiva.solicitud && esModeloGratuito(tareaActiva.solicitud.modelId)
+                          ? 'El trabajo puede seguir procesándose en Magic Hour. Reanudar consulta su estado sin coste adicional.'
+                          : 'La generación puede seguir procesándose en Pollinations. Reanudar envía la solicitud idéntica, sin coste adicional.'}
                       </p>
                     )}
                   </div>
@@ -975,9 +1072,9 @@ export function Studio() {
                 </div>
                 {siguiendo && (
                   <p className="mt-2 text-xs text-muted">
-                    Si dejas de seguir, la generación puede continuar en Pollinations. Podrás
-                    reanudarla desde aquí o desde «Mis vídeos»; la solicitud idéntica no se vuelve a
-                    facturar.
+                    {tareaActiva.solicitud && esModeloGratuito(tareaActiva.solicitud.modelId)
+                      ? 'Si dejas de seguir, el trabajo puede continuar en Magic Hour. Podrás reanudarlo desde aquí o desde «Mis vídeos».'
+                      : 'Si dejas de seguir, la generación puede continuar en Pollinations. Podrás reanudarla desde aquí o desde «Mis vídeos»; la solicitud idéntica no se vuelve a facturar.'}
                   </p>
                 )}
               </div>
@@ -1139,7 +1236,7 @@ export function Studio() {
           <div>
             <dt className="text-xs text-muted">Imágenes de referencia</dt>
             <dd className="mt-0.5 font-medium">
-              {imagenes.length > 0 ? `${imagenes.length}` : 'Ninguna'}
+              {esGratis ? 'Solo texto a vídeo' : imagenes.length > 0 ? `${imagenes.length}` : 'Ninguna'}
             </dd>
           </div>
           <div className="col-span-2">
@@ -1148,9 +1245,19 @@ export function Studio() {
           </div>
         </dl>
         <p className="mt-3 rounded-xl2 bg-surface-2 p-3 text-xs leading-relaxed text-muted">
-          La generación puede tardar varios minutos. Puedes cerrar esta ventana o dejar de seguir
-          el progreso: la solicitud idéntica se puede reanudar desde «Mis vídeos» sin volver a
-          facturar. Las peticiones fallidas no se facturan.
+          {esGratis ? (
+            <>
+              La generación puede tardar varios minutos. Puedes cerrar esta ventana o dejar de
+              seguir el progreso: el seguimiento se reanuda desde «Mis vídeos» consultando el
+              estado del trabajo. Si la generación falla, Magic Hour devuelve los créditos.
+            </>
+          ) : (
+            <>
+              La generación puede tardar varios minutos. Puedes cerrar esta ventana o dejar de
+              seguir el progreso: la solicitud idéntica se puede reanudar desde «Mis vídeos» sin
+              volver a facturar. Las peticiones fallidas no se facturan.
+            </>
+          )}
         </p>
         {errorEnvio && (
           <div className="mt-3">

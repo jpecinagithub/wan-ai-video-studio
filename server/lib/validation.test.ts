@@ -13,10 +13,11 @@ const cuerpoValido = {
 };
 
 describe('MODEL_IDS', () => {
-  it('solo contiene los modelos de vídeo de Pollinations', () => {
+  it('contiene los modelos de Pollinations y el gratuito de Magic Hour', () => {
     expect([...MODEL_IDS]).toEqual([
       'bytedance/seedance-1-pro-fast',
       'google/veo-3.1-fast',
+      'magichour/ltx-2.5',
     ]);
   });
 });
@@ -48,9 +49,39 @@ describe('GenerateVideoBodySchema', () => {
     expect(parsed.success).toBe(false);
   });
 
-  it('rechaza duraciones fuera de [2,10]', () => {
-    expect(GenerateVideoBodySchema.safeParse({ ...cuerpoValido, duration: 1 }).success).toBe(false);
-    expect(GenerateVideoBodySchema.safeParse({ ...cuerpoValido, duration: 30 }).success).toBe(false);
+  it('acepta el modelo gratuito de Magic Hour', () => {
+    const parsed = GenerateVideoBodySchema.safeParse({
+      prompt: 'Un perro corriendo por la playa al atardecer.',
+      modelId: 'magichour/ltx-2.5',
+      duration: 30,
+      resolution: '480p',
+      aspectRatio: '9:16',
+      audio: true,
+    });
+    expect(parsed.success).toBe(true);
+  });
+
+  it('acepta prompts de hasta 5000 caracteres (Magic Hour va en JSON)', () => {
+    const parsed = GenerateVideoBodySchema.safeParse({
+      ...cuerpoValido,
+      modelId: 'magichour/ltx-2.5',
+      prompt: 'x'.repeat(5000),
+    });
+    expect(parsed.success).toBe(true);
+  });
+
+  it('rechaza prompts de más de 5000 caracteres', () => {
+    const parsed = GenerateVideoBodySchema.safeParse({
+      ...cuerpoValido,
+      prompt: 'x'.repeat(5001),
+    });
+    expect(parsed.success).toBe(false);
+  });
+
+  it('rechaza duraciones fuera de [1,60]', () => {
+    expect(GenerateVideoBodySchema.safeParse({ ...cuerpoValido, duration: 0 }).success).toBe(false);
+    expect(GenerateVideoBodySchema.safeParse({ ...cuerpoValido, duration: 61 }).success).toBe(false);
+    expect(GenerateVideoBodySchema.safeParse({ ...cuerpoValido, duration: 30 }).success).toBe(true);
   });
 
   it('rechaza relaciones de aspecto no soportadas por los modelos', () => {
@@ -58,9 +89,11 @@ describe('GenerateVideoBodySchema', () => {
     expect(parsed.success).toBe(false);
   });
 
-  it('rechaza prompts de más de 2000 caracteres (límite de la URL)', () => {
+  it('el límite de 2000 caracteres de Pollinations ya no está en el esquema (lo aplica generate.ts)', () => {
+    // El esquema admite hasta 5000 (Magic Hour va en JSON); el endpoint
+    // /generate rechaza >2000 solo para los modelos de Pollinations.
     const parsed = GenerateVideoBodySchema.safeParse({ ...cuerpoValido, prompt: 'x'.repeat(2001) });
-    expect(parsed.success).toBe(false);
+    expect(parsed.success).toBe(true);
   });
 
   it('rechaza URLs de imagen que no sean https', () => {

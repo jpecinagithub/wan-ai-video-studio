@@ -1,4 +1,10 @@
-import type { AppConfig, GenerationRequest, GenerationResponse, ModelCapability } from '../types';
+import type {
+  AppConfig,
+  GenerationRequest,
+  GenerationResponse,
+  ModelCapability,
+  TaskStatusResponse,
+} from '../types';
 
 const BASE = '/api/video';
 
@@ -73,15 +79,27 @@ export const api = {
   },
 
   /**
-   * Genera un vídeo. La respuesta puede ser 'completado' (con videoUrl) o
-   * 'procesando' (202): en ese caso hay que reintentar la petición IDÉNTICA
-   * (mismos parámetros y seed); el proveedor la retoma sin volver a facturar.
+   * Genera un vídeo.
+   * - Pollinations: la respuesta puede ser 'completado' (con videoUrl) o
+   *   'procesando' (202): en ese caso hay que reintentar la petición IDÉNTICA
+   *   (mismos parámetros y seed); el proveedor la retoma sin volver a facturar.
+   * - Magic Hour: la respuesta es 'pendiente' (201) con el taskId del trabajo;
+   *   hay que consultar el estado con `consultarEstado` hasta completarse.
    */
   generarVideo(datos: GenerationRequest): Promise<GenerationResponse> {
     return request<GenerationResponse>('/generate', {
       method: 'POST',
       body: JSON.stringify(datos),
     });
+  },
+
+  /**
+   * Consulta el estado de un trabajo de Magic Hour (taskId con prefijo `mh-`).
+   * Responde 'pendiente' | 'procesando' (seguir consultando) o 'completado'
+   * (con videoUrl). Si el trabajo falló, lanza ApiClientError.
+   */
+  consultarEstado(taskId: string): Promise<TaskStatusResponse> {
+    return request<TaskStatusResponse>(`/status/${encodeURIComponent(taskId)}`);
   },
 
   modelos(): Promise<{ modelos: ModelCapability[] }> {

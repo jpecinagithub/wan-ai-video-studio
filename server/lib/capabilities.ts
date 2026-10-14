@@ -3,15 +3,23 @@ import type { ModelIdApi } from './validation.js';
 
 /**
  * Registro centralizado del backend: modelos soportados y sus capacidades.
- * Precios en pollen por segundo de vídeo generado, verificados contra el
- * catálogo en vivo de Pollinations (GET /video/models, 2026-10-14).
- * $1 ≈ 1 pollen (FAQ oficial de Pollinations). Las peticiones fallidas
- * no se facturan. Todos los modelos de vídeo requieren Pollen de pago.
+ *
+ * - Pollinations: precios en pollen por segundo de vídeo generado, verificados
+ *   contra el catálogo en vivo (GET /video/models, 2026-10-14). $1 ≈ 1 pollen
+ *   (FAQ oficial). Las peticiones fallidas no se facturan. Todos los modelos
+ *   de vídeo requieren Pollen de pago.
+ * - Magic Hour: plan gratuito con créditos al registrarse (sin tarjeta).
+ *   Límites del modelo `ltx-2.5` (el `default` del plan gratuito) verificados
+ *   en docs.magichour.ai (2026-10-14): 1-60 s enteros, 16:9/9:16/1:1,
+ *   480p/720p/1080p (en gratis por defecto 480p), audio sin coste extra,
+ *   solo texto a vídeo. Si la generación falla, los créditos se devuelven.
  */
 
 export type VelocidadModelo = 'rápida' | 'muy rápida';
 export type ResolucionApi = '480p' | '720p' | '1080p';
 export type EstadoIntegracion = 'disponible';
+/** 'pago' = Pollinations (pollen de pago) · 'gratis' = Magic Hour (créditos gratuitos). */
+export type TipoCoste = 'pago' | 'gratis';
 
 export interface CapacidadModelo {
   id: ModelIdApi;
@@ -25,13 +33,14 @@ export interface CapacidadModelo {
   duraciones: number[];
   duracionDefecto: number;
   /**
-   * Imágenes admitidas: 1 = solo fotograma inicial; 2 = inicial + final.
-   * Se envían como image[0] (inicial) e image[1] (final).
+   * Imágenes admitidas: 1 = solo fotograma inicial; 2 = inicial + final;
+   * 0 = solo texto a vídeo.
    */
   maxImagenes: number;
   /** El modelo puede generar pista de audio (Veo la factura aparte). */
   generaAudio: boolean;
-  /** Pollen por segundo de vídeo, por resolución. */
+  tipoCoste: TipoCoste;
+  /** Pollen por segundo de vídeo, por resolución (solo tipoCoste 'pago'). */
   precioVideoPorSegundo: Record<ResolucionApi, number>;
   /** Pollen por segundo de audio (0 si no aplica). */
   precioAudioPorSegundo: number;
@@ -56,6 +65,7 @@ export const MODELOS: CapacidadModelo[] = [
     duracionDefecto: 8,
     maxImagenes: 1,
     generaAudio: false,
+    tipoCoste: 'pago',
     precioVideoPorSegundo: { '480p': 0.015, '720p': 0.025, '1080p': 0.06 },
     precioAudioPorSegundo: 0,
     estadoIntegracion: 'disponible',
@@ -77,8 +87,31 @@ export const MODELOS: CapacidadModelo[] = [
     duracionDefecto: 8,
     maxImagenes: 2,
     generaAudio: true,
+    tipoCoste: 'pago',
     precioVideoPorSegundo: { '480p': 0.08, '720p': 0.08, '1080p': 0.1 },
     precioAudioPorSegundo: 0.02,
+    estadoIntegracion: 'disponible',
+  },
+  {
+    id: 'magichour/ltx-2.5',
+    nombre: 'LTX 2.5',
+    descripcion:
+      'Modelo gratuito de Magic Hour (LTX Video): el más rápido para iterar, clips de hasta 60 segundos con audio. Se paga con los créditos gratuitos de tu cuenta.',
+    caracteristicas: [
+      'Gratis: créditos al registrarse, sin tarjeta',
+      'Clips de hasta 60 segundos',
+      'Audio incluido sin coste extra',
+    ],
+    velocidad: 'muy rápida',
+    resoluciones: ['480p', '720p', '1080p'],
+    resolucionDefecto: '480p',
+    duraciones: [4, 6, 8, 10, 15, 20, 30],
+    duracionDefecto: 8,
+    maxImagenes: 0,
+    generaAudio: true,
+    tipoCoste: 'gratis',
+    precioVideoPorSegundo: { '480p': 0, '720p': 0, '1080p': 0 },
+    precioAudioPorSegundo: 0,
     estadoIntegracion: 'disponible',
   },
 ];

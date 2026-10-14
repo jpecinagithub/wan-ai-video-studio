@@ -2,14 +2,24 @@
  * Tipos compartidos del frontend de WAN AI Video Studio.
  * No contienen secretos ni lógica de proveedor.
  *
- * Fuente de verdad de capacidades: catálogo en vivo de Pollinations
- * (GET /video/models, verificado 2026-10-14). Precios en pollen;
- * $1 ≈ 1 pollen (FAQ oficial de Pollinations).
+ * Fuentes de verdad de capacidades:
+ * - Pollinations (GET /video/models, verificado 2026-10-14). Precios en
+ *   pollen; $1 ≈ 1 pollen (FAQ oficial de Pollinations).
+ * - Magic Hour (docs.magichour.ai, verificado 2026-10-14): plan gratuito
+ *   con créditos al registrarse, sin tarjeta.
  */
 
 export type VideoStatus = 'pendiente' | 'procesando' | 'completado' | 'error' | 'cancelado';
 
-export type ModelId = 'bytedance/seedance-1-pro-fast' | 'google/veo-3.1-fast';
+export type ModelId =
+  | 'bytedance/seedance-1-pro-fast'
+  | 'google/veo-3.1-fast'
+  | 'magichour/ltx-2.5';
+
+/** true si el modelo es del proveedor gratuito (Magic Hour). */
+export function esModeloGratuito(modelId: ModelId): boolean {
+  return modelId.startsWith('magichour/');
+}
 
 /** Resoluciones de la UI (cada modelo admite un subconjunto). */
 export type Resolution = '480p' | '720p' | '1080p';
@@ -39,25 +49,39 @@ export interface GenerationRequest {
 
 /**
  * Respuesta de POST /api/video/generate.
- * - 'completado': el vídeo está listo (videoUrl pública, 30 días).
- * - 'procesando': el proveedor sigue generando; el cliente debe reintentar
- *   la petición IDÉNTICA (el proveedor la retoma sin volver a facturar).
+ * - 'completado' (Pollinations): el vídeo está listo (videoUrl pública, 30 días).
+ * - 'procesando' (Pollinations): el proveedor sigue generando; el cliente debe
+ *   reintentar la petición IDÉNTICA (el proveedor la retoma sin volver a facturar).
+ * - 'pendiente' (Magic Hour): trabajo creado; el cliente consulta
+ *   GET /api/video/status/:taskId hasta completarse.
  */
 export interface GenerationResponse {
-  estado: 'completado' | 'procesando';
+  estado: 'completado' | 'procesando' | 'pendiente';
   videoUrl?: string;
-  /** Fecha ISO de caducidad estimada de la URL (30 días). */
+  /** Identificador del trabajo (Magic Hour, con prefijo `mh-`). */
+  taskId?: string;
+  /** Fecha ISO de caducidad estimada de la URL (30 días, Pollinations). */
   expiraEn?: string;
   mensaje?: string;
-  /** Coste estimado en pollen (solo cuando está completado). */
+  /** Coste estimado en pollen (solo Pollinations, cuando está completado). */
   costePollen?: number;
+  /** Créditos estimados de Magic Hour (solo informativo). */
+  creditosEstimados?: number;
   metadatos?: {
     modelo?: ModelId;
     nombreModelo?: string;
     duracion?: number;
     resolucion?: Resolution;
     aspecto?: AspectRatio;
+    gratuito?: boolean;
   };
+}
+
+/** Respuesta de GET /api/video/status/:taskId (Magic Hour). */
+export interface TaskStatusResponse {
+  estado: 'pendiente' | 'procesando' | 'completado';
+  videoUrl?: string;
+  mensaje?: string;
 }
 
 /** Indicador orientativo de velocidad de generación. */
@@ -77,11 +101,13 @@ export interface ModelCapability {
   /** Duraciones permitidas en segundos (lista cerrada por modelo). */
   duraciones: number[];
   duracionDefecto: number;
-  /** 1 = solo fotograma inicial; 2 = inicial + final. */
+  /** 0 = solo texto a vídeo; 1 = solo fotograma inicial; 2 = inicial + final. */
   maxImagenes: number;
   /** El modelo puede generar pista de audio. */
   generaAudio: boolean;
-  /** Pollen por segundo de vídeo, por resolución. */
+  /** 'pago' = Pollinations (pollen de pago) · 'gratis' = Magic Hour (créditos gratuitos). */
+  tipoCoste: 'pago' | 'gratis';
+  /** Pollen por segundo de vídeo, por resolución (solo tipoCoste 'pago'). */
   precioVideoPorSegundo: PricePerSecond;
   /** Pollen por segundo de audio (0 si no aplica). */
   precioAudioPorSegundo: number;
@@ -98,13 +124,15 @@ export interface AppConfig {
       duraciones: number[];
       resoluciones: Resolution[];
       maxImagenes: number;
+      tipoCoste: 'pago' | 'gratis';
+      generaAudio: boolean;
     }>;
   };
   integracion: {
     estado: 'disponible';
     /** Este proyecto NO tiene modo demo por decisión expresa del usuario. */
     modoDemo: false;
-    proveedor: string;
+    proveedores: Array<{ nombre: string; tipoCoste: 'pago' | 'gratis'; claveEnv: string }>;
     modelos: ModelId[];
   };
 }
@@ -147,6 +175,11 @@ export interface VideoRecord {
    * reintentar de forma idéntica sin volver a facturar).
    */
   solicitud?: GenerationRequest;
+  /**
+   * Identificador del trabajo en el proveedor (Magic Hour, con prefijo
+   * `mh-`): permite reanudar el seguimiento desde Mis vídeos.
+   */
+  taskIdRemoto?: string;
   /** true si el usuario dejó de seguir la generación (puede seguir en el proveedor). */
   seguimientoDetenido?: boolean;
   /**

@@ -11,7 +11,7 @@ import { HttpError, requireMethod, sendError } from '../../server/lib/errors.js'
  * para evitar usos como proxy abierto.
  */
 
-const HOSTS_PERMITIDOS = ['media.pollinations.ai'];
+const HOSTS_PERMITIDOS = ['media.pollinations.ai', 'videos.magichour.ai'];
 
 const MAX_LONGITUD_NOMBRE = 100;
 

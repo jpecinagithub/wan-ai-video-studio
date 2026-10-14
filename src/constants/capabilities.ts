@@ -6,12 +6,15 @@ import { MODELOS, obtenerModelo } from './models';
  * Toda la interfaz construye sus controles a partir de aquí, de modo que
  * una combinación incompatible se deshabilita con su motivo explicado.
  *
- * Límites verificados contra el catálogo en vivo de Pollinations
- * (GET /video/models y OpenAPI de /video/{prompt}, 2026-10-14):
- * - Seedance Pro Fast: duración entera 2-10 s, 480p/720p/1080p,
+ * Límites verificados:
+ * - Pollinations (GET /video/models y OpenAPI de /video/{prompt}, 2026-10-14):
+ *   Seedance Pro Fast: duración entera 2-10 s, 480p/720p/1080p,
  *   1 imagen (fotograma inicial), sin pista de audio.
- * - Veo 3.1 Fast: duración 4/6/8 s, 720p/1080p, 2 imágenes
+ *   Veo 3.1 Fast: duración 4/6/8 s, 720p/1080p, 2 imágenes
  *   (fotogramas inicial y final), audio opcional (+0,02 pollen/s).
+ * - Magic Hour (docs.magichour.ai, 2026-10-14): LTX 2.5 (default del plan
+ *   gratuito): 1-60 s enteros, 480p/720p/1080p (en gratis por defecto 480p),
+ *   audio sin coste extra, solo texto a vídeo (sin imágenes).
  * - Relaciones de aspecto soportadas por estos modelos: 16:9 y 9:16.
  */
 
@@ -32,8 +35,12 @@ export interface OpcionAspecto {
 
 export const CAPACIDADES = {
   prompt: {
-    /** El prompt viaja en la ruta de una petición GET al proveedor. */
-    maxCaracteres: 2000,
+    /**
+     * El prompt viaja en la ruta de una petición GET en Pollinations
+     * (límite práctico 2000); en Magic Hour va en JSON (límite 5000).
+     */
+    maxCaracteres: 5000,
+    maxCaracteresPollinations: 2000,
   },
   resoluciones: [
     {
@@ -61,7 +68,7 @@ export const CAPACIDADES = {
   ] as OpcionAspecto[],
   audio: {
     descripcion:
-      'Generar el vídeo con pista de audio. Solo Veo 3.1 genera audio (suma 0,02 pollen/s); en Seedance no tiene efecto.',
+      'Generar el vídeo con pista de audio. Veo 3.1 suma 0,02 pollen/s; en Seedance no tiene efecto; en LTX 2.5 (gratis) no añade coste.',
   },
   avanzadas: {
     semilla: {
@@ -100,21 +107,32 @@ export function motivoIncompatibilidad(p: ParametrosGeneracion): string | null {
 
 export interface EstimacionCoste {
   disponible: true;
-  /** Coste estimado en pollen. */
+  /** Coste estimado en pollen (0 para el modelo gratuito). */
   pollen: number;
+  /** true si el modelo usa los créditos gratuitos de Magic Hour. */
+  gratis: boolean;
   /** Texto listo para mostrar, etiquetado como estimación. */
   texto: string;
 }
 
 /**
- * Estimación de coste en pollen: duración × tarifa por segundo
- * (vídeo + audio si aplica). $1 ≈ 1 pollen (FAQ oficial de Pollinations).
- * Las peticiones fallidas no se facturan.
+ * Estimación de coste: duración × tarifa por segundo (vídeo + audio si
+ * aplica). Para el modelo gratuito devuelve coste 0 y el texto «Gratis».
+ * $1 ≈ 1 pollen (FAQ oficial de Pollinations). Las peticiones fallidas
+ * no se facturan; en Magic Hour los créditos se devuelven.
  */
 export function estimarCoste(p: ParametrosGeneracion): EstimacionCoste {
   const modelo = obtenerModelo(p.modelId);
   if (!modelo) {
     throw new Error(`Modelo desconocido: ${p.modelId}`);
+  }
+  if (modelo.tipoCoste === 'gratis') {
+    return {
+      disponible: true,
+      pollen: 0,
+      gratis: true,
+      texto: 'Gratis (créditos gratuitos de Magic Hour)',
+    };
   }
   const video = p.duration * modelo.precioVideoPorSegundo[p.resolution];
   const audio = p.audio && modelo.generaAudio ? p.duration * modelo.precioAudioPorSegundo : 0;
@@ -122,6 +140,7 @@ export function estimarCoste(p: ParametrosGeneracion): EstimacionCoste {
   return {
     disponible: true,
     pollen,
+    gratis: false,
     texto: `≈ ${pollen.toFixed(2)} pollen (≈ $${pollen.toFixed(2)} USD)`,
   };
 }

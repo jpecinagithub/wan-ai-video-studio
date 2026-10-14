@@ -13,8 +13,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
 
     sendOk(res, {
       limites: {
-        /** El prompt viaja en la ruta de una petición GET al proveedor. */
-        promptMax: 2000,
+        /** El prompt viaja en la ruta de una petición GET en Pollinations (2000); en Magic Hour va en JSON (5000). */
+        promptMax: 5000,
+        promptMaxPollinations: 2000,
         resoluciones: ['480p', '720p', '1080p'],
         relacionesAspecto: ['16:9', '9:16'],
         modelos: MODELOS.map((m) => ({
@@ -22,13 +23,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
           duraciones: m.duraciones,
           resoluciones: m.resoluciones,
           maxImagenes: m.maxImagenes,
+          tipoCoste: m.tipoCoste,
+          generaAudio: m.generaAudio,
         })),
       },
       integracion: {
         estado: 'disponible',
         // Decisión expresa del usuario: este proyecto NO tiene modo demo.
         modoDemo: false,
-        proveedor: 'Pollinations',
+        proveedores: [
+          { nombre: 'Pollinations', tipoCoste: 'pago', claveEnv: 'POLLINATIONS_API_KEY' },
+          { nombre: 'Magic Hour', tipoCoste: 'gratis', claveEnv: 'MAGIC_HOUR_API_KEY' },
+        ],
         modelos: MODELOS.map((m) => m.id),
       },
     });

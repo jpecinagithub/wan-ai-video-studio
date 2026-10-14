@@ -3,11 +3,12 @@ import { HttpError } from './errors.js';
 import { MODELOS, MONEDA_PRECIOS, estimarCostePollen, validarCombinacion } from './capabilities.js';
 
 describe('registro de modelos', () => {
-  it('expone los dos modelos de Pollinations con precios en pollen', () => {
+  it('expone los dos modelos de Pollinations y el gratuito de Magic Hour', () => {
     expect(MONEDA_PRECIOS).toBe('pollen');
     expect(MODELOS.map((m) => m.id)).toEqual([
       'bytedance/seedance-1-pro-fast',
       'google/veo-3.1-fast',
+      'magichour/ltx-2.5',
     ]);
   });
 
@@ -25,6 +26,21 @@ describe('registro de modelos', () => {
     expect(seedance.resoluciones).toEqual(['480p', '720p', '1080p']);
     expect(seedance.maxImagenes).toBe(1);
     expect(seedance.generaAudio).toBe(false);
+  });
+
+  it('LTX 2.5 (Magic Hour) es gratis, sin imágenes y con audio', () => {
+    const ltx = MODELOS.find((m) => m.id === 'magichour/ltx-2.5')!;
+    expect(ltx.tipoCoste).toBe('gratis');
+    expect(ltx.maxImagenes).toBe(0);
+    expect(ltx.generaAudio).toBe(true);
+    expect(ltx.duraciones).toEqual([4, 6, 8, 10, 15, 20, 30]);
+    expect(ltx.resoluciones).toEqual(['480p', '720p', '1080p']);
+  });
+
+  it('los modelos de Pollinations son de pago', () => {
+    for (const id of ['bytedance/seedance-1-pro-fast', 'google/veo-3.1-fast'] as const) {
+      expect(MODELOS.find((m) => m.id === id)!.tipoCoste).toBe('pago');
+    }
   });
 });
 
@@ -65,6 +81,19 @@ describe('validarCombinacion', () => {
     } catch (err) {
       expect((err as HttpError).message).toContain('1 imagen');
     }
+  });
+
+  it('LTX 2.5 rechaza cualquier imagen (solo texto a vídeo)', () => {
+    try {
+      validarCombinacion('magichour/ltx-2.5', 8, '480p', 1);
+      expect.unreachable('debería haber lanzado');
+    } catch (err) {
+      expect((err as HttpError).estado).toBe(400);
+    }
+  });
+
+  it('LTX 2.5 acepta 30 s en 480p sin imágenes', () => {
+    expect(() => validarCombinacion('magichour/ltx-2.5', 30, '480p', 0)).not.toThrow();
   });
 });
 

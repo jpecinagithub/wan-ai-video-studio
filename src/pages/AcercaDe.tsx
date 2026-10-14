@@ -13,8 +13,8 @@ export function AcercaDe() {
       <p className="mb-6 text-sm text-muted sm:text-base">
         WAN AI Video Studio es un estudio de creación audiovisual con inteligencia artificial que
         transforma descripciones de texto en vídeos, con una experiencia sencilla, elegante y
-        profesional. Funciona en modo real contra Pollinations: cada generación consume Pollen de
-        tu cuenta y puede tardar varios minutos.
+        profesional. Funciona en modo real con dos proveedores: Pollinations (modelos de pago) y
+        Magic Hour (modelo gratuito). Cada generación puede tardar varios minutos.
       </p>
 
       <div className="flex flex-col gap-4">
@@ -61,6 +61,14 @@ export function AcercaDe() {
               Seedance Pro Fast ≈ 0,20 pollen (≈ $0,20 USD). Antes de generar, el Estudio muestra
               una estimación.
             </p>
+            <p>
+              <strong className="text-ink">Magic Hour (gratis):</strong> al registrarte en{' '}
+              <span className="font-medium text-ink">magichour.ai</span> recibes créditos gratuitos
+              (sin tarjeta) y una clave de API. El modelo LTX 2.5 genera clips de 4 a 30 segundos
+              con audio incluido, sin coste adicional. Si la generación falla, los créditos se
+              devuelven. Ten en cuenta que es un proveedor más pequeño y la calidad puede ser
+              inferior a la de los modelos de pago.
+            </p>
           </div>
         </Card>
 
@@ -95,9 +103,9 @@ export function AcercaDe() {
             integración
           </h2>
           <p className="text-sm text-muted">
-            Integración con Pollinations (gen.pollinations.ai) en modo real. No se ha inventado
-            ningún endpoint, parámetro ni tarifa: todo proviene de su documentación y de su
-            catálogo en vivo.
+            Integración en modo real con Pollinations (gen.pollinations.ai) y Magic Hour
+            (api.magichour.ai). No se ha inventado ningún endpoint, parámetro ni tarifa: todo
+            proviene de su documentación y de su catálogo en vivo.
           </p>
         </Card>
 

@@ -4,12 +4,15 @@ import { z } from 'zod';
  * Validación estricta de todas las entradas de la API con Zod.
  *
  * Límites verificados contra el catálogo en vivo de Pollinations
- * (GET /video/models, 2026-10-14):
- * - Modelos: 'bytedance/seedance-1-pro-fast' (2-10 s, 480p/720p/1080p,
+ * (GET /video/models, 2026-10-14) y la documentación oficial de Magic Hour
+ * (docs.magichour.ai, 2026-10-14):
+ * - Pollinations: 'bytedance/seedance-1-pro-fast' (2-10 s, 480p/720p/1080p,
  *   1 imagen = fotograma inicial) y 'google/veo-3.1-fast' (4/6/8 s,
  *   720p/1080p, 2 imágenes = inicial + final, audio opcional con coste).
- * - El prompt viaja en la ruta de una petición GET al proveedor: límite
+ *   El prompt viaja en la ruta de una petición GET al proveedor: límite
  *   práctico de 2000 caracteres para no romper la URL.
+ * - Magic Hour: 'magichour/ltx-2.5' (modelo `default` del plan gratuito;
+ *   1-60 s enteros, 480p/720p/1080p, audio sin coste, solo texto a vídeo).
  * - Relaciones de aspecto soportadas por estos modelos de vídeo: 16:9 y 9:16.
  */
 
@@ -17,8 +20,14 @@ import { z } from 'zod';
 export const MODEL_IDS = [
   'bytedance/seedance-1-pro-fast',
   'google/veo-3.1-fast',
+  'magichour/ltx-2.5',
 ] as const;
 export type ModelIdApi = (typeof MODEL_IDS)[number];
+
+/** true si el modelo pertenece a Magic Hour (gratuito, asíncrono). */
+export function esModeloMagicHourApi(modelId: string): boolean {
+  return modelId.startsWith('magichour/');
+}
 
 /**
  * Imagen de referencia como data URI (se sube al almacenamiento de medios
@@ -50,13 +59,14 @@ export const GenerateVideoBodySchema = z.object({
     .string({ required_error: 'El prompt es obligatorio.' })
     .trim()
     .min(1, 'El prompt no puede estar vacío.')
-    .max(2000, 'El prompt supera los 2000 caracteres permitidos.'),
+    // 2000 en Pollinations (el prompt viaja en la URL); 5000 en Magic Hour (JSON).
+    .max(5000, 'El prompt supera los 5000 caracteres permitidos.'),
   modelId: z.enum(MODEL_IDS, { errorMap: () => ({ message: 'Modelo no válido.' }) }),
   duration: z
     .number({ invalid_type_error: 'La duración debe ser un número.' })
     .int('La duración debe ser un número entero de segundos.')
-    .min(2, 'La duración mínima es de 2 segundos.')
-    .max(10, 'La duración máxima es de 10 segundos.'),
+    .min(1, 'La duración mínima es de 1 segundo.')
+    .max(60, 'La duración máxima es de 60 segundos.'),
   resolution: z.enum(['480p', '720p', '1080p'], {
     errorMap: () => ({ message: 'Resolución no válida.' }),
   }),

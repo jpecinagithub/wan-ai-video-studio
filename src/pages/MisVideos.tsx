@@ -97,8 +97,11 @@ export function MisVideos() {
 
   const reanudarSeguimiento = (v: VideoRecord) => {
     if (!v.solicitud) return;
-    // El Estudio retoma la solicitud idéntica sin volver a facturar.
-    navigate('/', { state: { replay: { solicitud: v.solicitud, recordId: v.id } } });
+    // Magic Hour: se retoma el trabajo existente (taskIdRemoto). Pollinations:
+    // el Estudio retoma la solicitud idéntica sin volver a facturar.
+    navigate('/', {
+      state: { replay: { solicitud: v.solicitud, recordId: v.id, taskIdRemoto: v.taskIdRemoto } },
+    });
   };
 
   const confirmarEliminar = async (v: VideoRecord) => {
