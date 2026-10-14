@@ -199,7 +199,7 @@ describe('AlibabaVideoProvider (fetch simulado)', () => {
     await expect(proveedor.crearTareaVideo(entradaBase)).rejects.toMatchObject({
       estado: 401,
       message:
-        'La API key no es válida o no corresponde a la región configurada. Revisa ALIBABA_API_KEY y ALIBABA_REGION.',
+        'La API key no es válida o no corresponde a la región configurada. Revisa ALIBABA_API_KEY y ALIBABA_REGION. Código del proveedor: InvalidApiKey.',
     });
   });
 
