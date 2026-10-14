@@ -6,6 +6,7 @@ import {
   hayHuecoSimultaneidad,
   MAX_SIMULTANEAS,
   obtenerRespuestaIdempotente,
+  reconciliarActivas,
   registrarActiva,
   type RespuestaCreacion,
 } from '../../server/lib/tareas.js';
@@ -55,6 +56,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
       }
     }
 
+    const env = readProviderEnv();
+    const proveedor = new AlibabaVideoProvider(env);
+
+    // Si no hay hueco, se reconcilia con el estado real del proveedor antes
+    // de rechazar: las tareas que ya terminaron allí liberan su hueco aunque
+    // el navegador se cerrara a mitad del seguimiento.
+    if (!hayHuecoSimultaneidad()) {
+      await reconciliarActivas((taskId) => proveedor.obtenerTareaVideo(taskId));
+    }
     if (!hayHuecoSimultaneidad()) {
       throw new HttpError(
         429,
@@ -62,9 +72,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
         `Has alcanzado el límite de ${MAX_SIMULTANEAS} generaciones simultáneas. Espera a que termine alguna antes de crear otra.`,
       );
     }
-
-    const env = readProviderEnv();
-    const proveedor = new AlibabaVideoProvider(env);
 
     const tarea = await proveedor.crearTareaVideo({
       modelId: datos.modelId,

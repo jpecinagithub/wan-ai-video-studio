@@ -2,12 +2,10 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { HttpError, requireMethod, sendError, sendOk } from '../../server/lib/errors.js';
 import { AlibabaVideoProvider, readProviderEnv } from '../../server/lib/provider.js';
 import type { InfoTareaProveedor } from '../../server/lib/provider.js';
-import { marcarTerminal } from '../../server/lib/tareas.js';
+import { marcarTerminal, esEstadoTerminal } from '../../server/lib/tareas.js';
 import { StatusQuerySchema } from '../../server/lib/validation.js';
 
 type EstadoNormalizado = 'pendiente' | 'procesando' | 'completado' | 'error' | 'cancelado';
-
-const ESTADOS_TERMINALES: InfoTareaProveedor['estado'][] = ['succeeded', 'failed', 'cancelled', 'unknown'];
 
 /**
  * GET /api/video/status/:taskId
@@ -33,7 +31,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
     const proveedor = new AlibabaVideoProvider(env);
     const tarea = await proveedor.obtenerTareaVideo(parsed.data.taskId);
 
-    if (ESTADOS_TERMINALES.includes(tarea.estado)) {
+    if (esEstadoTerminal(tarea.estado)) {
       marcarTerminal(tarea.taskId);
     }
 

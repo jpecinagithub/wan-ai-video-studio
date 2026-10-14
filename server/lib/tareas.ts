@@ -4,13 +4,19 @@
  * - Idempotencia: si una petición llega dos veces con la misma clave,
  *   se devuelve la respuesta original (201 → 200) sin crear otra tarea
  *   en el proveedor. TTL de 10 minutos.
- * - Simultaneidad: como máximo 2 tareas no terminales a la vez; el resto
- *   de peticiones reciben 429. Las entradas caducan a las 24h (el proveedor
- *   caduca las tareas en ese plazo).
+ * - Simultaneidad: como máximo 2 tareas no terminales a la vez. Antes de
+ *   rechazar por falta de hueco se reconcilian los huecos consultando el
+ *   estado real en el proveedor (las tareas que ya terminaron allí liberan
+ *   su hueco aunque el navegador se cerrara a mitad del polling). Como
+ *   red de seguridad, los huecos más antiguos de 90 minutos se consideran
+ *   caducados: la generación típica tarda minutos y este registro solo es
+ *   una puerta de creación, no afecta al seguimiento de tareas existentes.
  *
  * Nota: en serverless este registro solo vive dentro de cada instancia
  * cálida; es una protección de buena fe, no una garantía distribuida.
  */
+
+import type { EstadoTareaProveedor } from './provider.js';
 
 export interface RespuestaCreacion {
   taskId: string;
@@ -20,7 +26,7 @@ export interface RespuestaCreacion {
 
 export const MAX_SIMULTANEAS = 2;
 const TTL_IDEMPOTENCIA_MS = 10 * 60 * 1000;
-const TTL_ACTIVA_MS = 24 * 60 * 60 * 1000;
+const TTL_ACTIVA_MS = 90 * 60 * 1000;
 
 interface EntradaIdempotencia {
   respuesta: RespuestaCreacion;
@@ -81,6 +87,38 @@ export function registrarActiva(taskId: string): void {
 /** Marca una tarea como terminal: libera su hueco de simultaneidad. */
 export function marcarTerminal(taskId: string): void {
   activas.delete(taskId);
+}
+
+/** Lista los identificadores de tareas activas (tras podar caducadas). */
+export function obtenerActivas(): string[] {
+  podarActivas();
+  return [...activas.keys()];
+}
+
+/** ¿El estado del proveedor es terminal (la tarea ya no va a cambiar)? */
+export function esEstadoTerminal(estado: EstadoTareaProveedor): boolean {
+  return estado === 'succeeded' || estado === 'failed' || estado === 'cancelled' || estado === 'unknown';
+}
+
+/**
+ * Reconcilia los huecos de simultaneidad con la realidad del proveedor:
+ * consulta el estado de cada tarea activa y libera las que ya terminaron.
+ * Si el proveedor no responde para una tarea, se conserva su hueco.
+ */
+export async function reconciliarActivas(
+  obtenerEstado: (taskId: string) => Promise<{ estado: EstadoTareaProveedor }>,
+): Promise<void> {
+  const ids = obtenerActivas();
+  await Promise.all(
+    ids.map(async (taskId) => {
+      try {
+        const info = await obtenerEstado(taskId);
+        if (esEstadoTerminal(info.estado)) marcarTerminal(taskId);
+      } catch {
+        /* Proveedor inaccesible para esta tarea: se conserva el hueco. */
+      }
+    }),
+  );
 }
 
 /** Limpia todo el registro (pensado para tests). */
